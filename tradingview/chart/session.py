@@ -150,7 +150,12 @@ class ChartSession:
 
             # Handle symbol errors
             if packet['type'] == 'symbol_error':
-                self._handle_error(f"({packet['data'][1]}) Symbol error:", packet['data'][2])
+                error_msg = packet['data'][2]
+                if "only available on tradingview" in error_msg.lower():
+                    logger.error(f"⚠️ TradingView Data Permission Error for {packet['data'][1]}: {error_msg}")
+                    logger.error("💡 This usually means your session doesn't have permissions for this symbol on 3rd party tools.")
+                    logger.error("💡 Try logging into a paid TradingView account in Brave, or check your TV_SESSION/TV_SIGNATURE.")
+                self._handle_error(f"({packet['data'][1]}) Symbol error:", error_msg)
                 return
 
             # Handle series errors

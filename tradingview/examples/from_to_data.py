@@ -13,8 +13,8 @@ from tradingview import Client
 async def main():
     """主函数"""
     # 检查环境变量
-    session = os.environ.get('TV_SESSION', "b7dc5nugsk5td47u39wiolrj1iy0u544")
-    signature = os.environ.get('TV_SIGNATURE', "v3:goGfCVtvE/NAUTmU4Kk+NhmPgfgIDk9mozUpMgUf77E=")
+    session = os.environ.get('TV_SESSION')
+    signature = os.environ.get('TV_SIGNATURE')
 
     if not session or not signature:
         raise ValueError('请设置TV_SESSION和TV_SIGNATURE环境变量')
