@@ -1,5 +1,5 @@
 """
-Graphics Parsing Module
+图形解析模块
 """
 
 TRANSLATOR = {
@@ -53,14 +53,14 @@ TRANSLATOR = {
 
 def graphic_parse(raw_graphic=None, indexes=None):
     """
-    Parse graphics data.
+    解析图形数据
 
     Args:
-        raw_graphic: Raw graphics data
-        indexes: Index list
+        raw_graphic: 原始图形数据
+        indexes: 索引列表
 
     Returns:
-        dict: Parsed graphics data
+        dict: 解析后的图形数据
     """
     if raw_graphic is None:
         raw_graphic = {}
@@ -175,14 +175,14 @@ def graphic_parse(raw_graphic=None, indexes=None):
 
 def get_cells(table_id, cells_data):
     """
-    Get table cells.
+    获取表格单元格
 
     Args:
-        table_id: Table ID
-        cells_data: Cells data
+        table_id: 表格ID
+        cells_data: 单元格数据
 
     Returns:
-        list: Cell matrix
+        list: 单元格矩阵
     """
     matrix = []
 
@@ -193,15 +193,15 @@ def get_cells(table_id, cells_data):
         row = cell.get('row', 0)
         col = cell.get('col', 0)
 
-        # Ensure enough rows
+        # 确保矩阵有足够的行
         while len(matrix) <= row:
             matrix.append([])
 
-        # Ensure enough columns
+        # 确保行有足够的列
         while len(matrix[row]) <= col:
             matrix[row].append(None)
 
-        # Fill cell data
+        # 填充单元格数据
         matrix[row][col] = {
             'id': cell.get('id'),
             'text': cell.get('t', ''),

@@ -547,6 +547,13 @@ class ChartSession:
                 nonlocal data_loaded, result_data
                 if data_loaded or not self._periods:
                     return
+
+                # Check if we have enough data or if it's been long enough
+                # Note: We don't resolve immediately to allow more chunks to arrive
+                # unless we already hit the requested count.
+                if len(self._periods) < count and len(self._periods) < 10:
+                    return
+
                 klines = []
                 for period in sorted(self._periods.values(), key=lambda p: p['time']):
                     klines.append({
