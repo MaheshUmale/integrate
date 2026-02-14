@@ -1,28 +1,35 @@
 """
-Miscellaneous Requests Module Exports
+杂项请求模块导出
 """
+
 from .misc_requests import (
-    fetch_scan_data,
     get_ta,
+    SearchMarketResult,
     search_market,
     search_market_v3,
+    SearchIndicatorResult,
     search_indicator,
     get_indicator,
+    User,
     login_user,
+    get_user,
     get_private_indicators,
     get_chart_token,
     get_drawings
 )
 
 __all__ = [
-    'fetch_scan_data',
-    'get_ta',
-    'search_market',
-    'search_market_v3',
-    'search_indicator',
-    'get_indicator',
-    'login_user',
-    'get_private_indicators',
-    'get_chart_token',
-    'get_drawings'
+    "get_ta",
+    "SearchMarketResult",
+    "search_market",
+    "search_market_v3",
+    "SearchIndicatorResult",
+    "search_indicator",
+    "get_indicator",
+    "User",
+    "login_user",
+    "get_user",
+    "get_private_indicators",
+    "get_chart_token",
+    "get_drawings"
 ]

@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-TradingView Real-time Data Adapter
-Handles real-time data streams, cache management, and event dispatching.
+TradingView实时数据适配器
+专门处理实时数据流、缓存管理和事件分发
 """
 
 import asyncio
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 
 
 class SubscriptionType(Enum):
-    """Subscription type"""
+    """订阅类型"""
     KLINE_1M = "1m"
     KLINE_5M = "5m"
     KLINE_15M = "15m"
@@ -34,7 +34,7 @@ class SubscriptionType(Enum):
 
 
 class EventType(Enum):
-    """Event type"""
+    """事件类型"""
     DATA_UPDATE = auto()
     CONNECTION_STATUS = auto()
     SUBSCRIPTION_STATUS = auto()
@@ -44,7 +44,7 @@ class EventType(Enum):
 
 @dataclass
 class SubscriptionInfo:
-    """Subscription info"""
+    """订阅信息"""
     symbol: str
     subscription_type: SubscriptionType
     callback: Callable
@@ -56,7 +56,7 @@ class SubscriptionInfo:
 
 @dataclass
 class RealtimeEvent:
-    """Real-time event"""
+    """实时事件"""
     event_type: EventType
     symbol: str
     data: Any
@@ -65,7 +65,7 @@ class RealtimeEvent:
 
 
 class RealtimeDataBuffer:
-    """Real-time data buffer"""
+    """实时数据缓冲器"""
 
     def __init__(self, max_size: int = 1000, max_age_seconds: int = 3600):
         self.max_size = max_size
@@ -74,7 +74,7 @@ class RealtimeDataBuffer:
         self.index_by_timestamp: Dict[int, int] = {}
         self.lock = threading.RLock()
 
-        # Statistics
+        # 统计信息
         self.stats = {
             'total_added': 0,
             'total_expired': 0,
@@ -84,51 +84,51 @@ class RealtimeDataBuffer:
         }
 
     def add_data(self, data: Any, timestamp: Optional[float] = None) -> bool:
-        """Add data to buffer"""
+        """添加数据到缓冲区"""
         try:
             with self.lock:
                 if timestamp is None:
                     timestamp = time.time()
 
-                # Check if data is expired
+                # 检查数据是否过期
                 if time.time() - timestamp > self.max_age_seconds:
                     return False
 
-                # Add data
+                # 添加数据
                 self.data_buffer.append((timestamp, data))
                 self.stats['total_added'] += 1
                 self.stats['current_size'] = len(self.data_buffer)
 
-                # Update timestamp range
+                # 更新时间戳范围
                 if self.stats['oldest_timestamp'] == 0:
                     self.stats['oldest_timestamp'] = timestamp
                 self.stats['newest_timestamp'] = timestamp
 
-                # Cleanup expired data
+                # 清理过期数据
                 self._cleanup_expired_data()
 
                 return True
 
         except Exception as e:
-            logger.error(f"Failed to add data to buffer: {e}")
+            logger.error(f"添加数据到缓冲区失败: {e}")
             return False
 
     def get_latest_data(self, count: int = 1) -> List[Tuple[float, Any]]:
-        """Get latest data"""
+        """获取最新数据"""
         try:
             with self.lock:
                 if not self.data_buffer:
                     return []
 
-                # Return latest count items
+                # 返回最新的count条数据
                 return list(self.data_buffer)[-count:]
 
         except Exception as e:
-            logger.error(f"Failed to get latest data: {e}")
+            logger.error(f"获取最新数据失败: {e}")
             return []
 
     def get_data_in_range(self, start_time: float, end_time: float) -> List[Tuple[float, Any]]:
-        """Get data within time range"""
+        """获取时间范围内的数据"""
         try:
             with self.lock:
                 result = []
@@ -139,16 +139,16 @@ class RealtimeDataBuffer:
                 return result
 
         except Exception as e:
-            logger.error(f"Failed to get data in range: {e}")
+            logger.error(f"获取范围数据失败: {e}")
             return []
 
     def _cleanup_expired_data(self) -> None:
-        """Cleanup expired data"""
+        """清理过期数据"""
         try:
             current_time = time.time()
             expired_count = 0
 
-            # Remove from left
+            # 从左侧移除过期数据
             while (self.data_buffer and
                    current_time - self.data_buffer[0][0] > self.max_age_seconds):
                 self.data_buffer.popleft()
@@ -157,17 +157,17 @@ class RealtimeDataBuffer:
             self.stats['total_expired'] += expired_count
             self.stats['current_size'] = len(self.data_buffer)
 
-            # Update oldest timestamp
+            # 更新最旧时间戳
             if self.data_buffer:
                 self.stats['oldest_timestamp'] = self.data_buffer[0][0]
             else:
                 self.stats['oldest_timestamp'] = 0
 
         except Exception as e:
-            logger.error(f"Failed to cleanup expired data: {e}")
+            logger.error(f"清理过期数据失败: {e}")
 
     def get_buffer_stats(self) -> Dict[str, Any]:
-        """Get buffer statistics"""
+        """获取缓冲区统计"""
         with self.lock:
             stats = self.stats.copy()
             if stats['current_size'] > 0:
@@ -179,7 +179,7 @@ class RealtimeDataBuffer:
 
 
 class EventDispatcher:
-    """Event Dispatcher"""
+    """事件分发器"""
 
     def __init__(self, max_workers: int = 4):
         self.max_workers = max_workers
@@ -189,7 +189,7 @@ class EventDispatcher:
         self.is_running = False
         self.dispatch_task: Optional[asyncio.Task] = None
 
-        # Event statistics
+        # 事件统计
         self.event_stats = {
             'events_received': 0,
             'events_dispatched': 0,
@@ -199,16 +199,16 @@ class EventDispatcher:
         }
 
     async def start(self) -> None:
-        """Start event dispatcher"""
+        """启动事件分发器"""
         if self.is_running:
             return
 
         self.is_running = True
         self.dispatch_task = asyncio.create_task(self._dispatch_loop())
-        logger.info("Event dispatcher started")
+        logger.info("事件分发器已启动")
 
     async def stop(self) -> None:
-        """Stop event dispatcher"""
+        """停止事件分发器"""
         self.is_running = False
 
         if self.dispatch_task:
@@ -218,32 +218,32 @@ class EventDispatcher:
             except asyncio.CancelledError:
                 pass
 
-        # Shutdown executor
+        # 关闭线程池
         self.executor.shutdown(wait=True)
-        logger.info("Event dispatcher stopped")
+        logger.info("事件分发器已停止")
 
     def register_handler(self, event_type: EventType, handler: Callable[[RealtimeEvent], None]) -> None:
-        """Register event handler"""
+        """注册事件处理器"""
         self.event_handlers[event_type].append(handler)
-        logger.info(f"Registered event handler: {event_type.name}")
+        logger.info(f"注册事件处理器: {event_type.name}")
 
     def unregister_handler(self, event_type: EventType, handler: Callable) -> bool:
-        """Unregister event handler"""
+        """取消注册事件处理器"""
         try:
             self.event_handlers[event_type].remove(handler)
-            logger.info(f"Unregistered event handler: {event_type.name}")
+            logger.info(f"取消注册事件处理器: {event_type.name}")
             return True
         except ValueError:
-            logger.warning(f"Handler not found for unregistration: {event_type.name}")
+            logger.warning(f"未找到要取消的事件处理器: {event_type.name}")
             return False
 
     async def dispatch_event(self, event: RealtimeEvent) -> bool:
-        """Dispatch event"""
+        """分发事件"""
         try:
             if not self.is_running:
                 return False
 
-            # Add to queue
+            # 添加到事件队列
             await self.event_queue.put(event)
             self.event_stats['events_received'] += 1
             self.event_stats['queue_size'] = self.event_queue.qsize()
@@ -251,67 +251,68 @@ class EventDispatcher:
             return True
 
         except asyncio.QueueFull:
-            logger.warning("Event queue full, dropping event")
+            logger.warning("事件队列已满，丢弃事件")
             self.event_stats['events_failed'] += 1
             return False
         except Exception as e:
-            logger.error(f"Event dispatch failed: {e}")
+            logger.error(f"分发事件失败: {e}")
             self.event_stats['events_failed'] += 1
             return False
 
     async def _dispatch_loop(self) -> None:
-        """Main dispatch loop"""
+        """事件分发主循环"""
         while self.is_running:
             try:
-                # Get event
+                # 获取事件
                 event = await asyncio.wait_for(self.event_queue.get(), timeout=0.1)
 
                 start_time = time.perf_counter()
 
-                # Get handlers
+                # 获取对应的处理器
                 handlers = self.event_handlers.get(event.event_type, [])
 
                 if handlers:
-                    # Execute all handlers concurrently
+                    # 并发执行所有处理器
                     tasks = []
                     for handler in handlers:
                         try:
                             if asyncio.iscoroutinefunction(handler):
                                 tasks.append(asyncio.create_task(handler(event)))
                             else:
-                                # Synchronous handlers run in executor
+                                # 同步处理器在线程池中执行
                                 tasks.append(asyncio.create_task(
                                     asyncio.get_event_loop().run_in_executor(
                                         self.executor, handler, event
                                     )
                                 ))
                         except Exception as e:
-                            logger.error(f"Failed to create event handler task: {e}")
+                            logger.error(f"创建事件处理任务失败: {e}")
 
-                    # Wait for all handlers
+                    # 等待所有处理器完成
                     if tasks:
                         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                        # Check results
+                        # 检查处理结果
                         for i, result in enumerate(results):
                             if isinstance(result, Exception):
-                                logger.error(f"Event handler {i} failed: {result}")
+                                logger.error(f"事件处理器 {i} 执行失败: {result}")
 
-                # Update stats
+                # 更新统计
                 dispatch_time = (time.perf_counter() - start_time) * 1000
                 self.event_stats['events_dispatched'] += 1
                 self._update_dispatch_time_stats(dispatch_time)
                 self.event_stats['queue_size'] = self.event_queue.qsize()
 
             except asyncio.TimeoutError:
+                # 超时继续循环
                 continue
             except Exception as e:
-                logger.error(f"Dispatch loop error: {e}")
+                logger.error(f"事件分发循环异常: {e}")
                 self.event_stats['events_failed'] += 1
                 await asyncio.sleep(0.01)
 
     def _update_dispatch_time_stats(self, dispatch_time: float) -> None:
-        """Update dispatch time statistics"""
+        """更新分发时间统计"""
         try:
             dispatched_count = self.event_stats['events_dispatched']
             if dispatched_count > 0:
@@ -319,10 +320,10 @@ class EventDispatcher:
                 new_avg = ((current_avg * (dispatched_count - 1)) + dispatch_time) / dispatched_count
                 self.event_stats['average_dispatch_time_ms'] = new_avg
         except Exception as e:
-            logger.error(f"Failed to update dispatch time stats: {e}")
+            logger.error(f"更新分发时间统计失败: {e}")
 
     def get_event_stats(self) -> Dict[str, Any]:
-        """Get event statistics"""
+        """获取事件统计"""
         stats = self.event_stats.copy()
         stats['handler_counts'] = {
             event_type.name: len(handlers)
@@ -332,78 +333,80 @@ class EventDispatcher:
 
 
 class AdvancedRealtimeAdapter:
-    """Advanced Real-time Data Adapter"""
+    """高级实时数据适配器"""
 
     def __init__(self, buffer_size: int = 1000, max_workers: int = 4):
-        # Components
+        # 核心组件
         self.subscriptions: Dict[str, SubscriptionInfo] = {}
         self.data_buffers: Dict[str, RealtimeDataBuffer] = {}
         self.event_dispatcher = EventDispatcher(max_workers=max_workers)
 
-        # Configuration
+        # 配置
         self.buffer_size = buffer_size
         self.is_running = False
 
-        # Monitoring
+        # 性能监控
         self.performance_monitor = PerformanceMonitor()
+
+        # 数据质量监控
         self.quality_monitor = DataQualityMonitor()
 
-        # Status
+        # 连接状态
         self.connection_status = defaultdict(lambda: False)
 
     async def initialize(self) -> bool:
-        """Initialize adapter"""
+        """初始化适配器"""
         try:
-            # Start dispatcher
+            # 启动事件分发器
             await self.event_dispatcher.start()
 
-            # Start performance monitoring
+            # 启动性能监控
             await self.performance_monitor.start()
 
-            # Start quality monitoring
+            # 启动质量监控
             await self.quality_monitor.start()
 
             self.is_running = True
-            logger.info("✅ Advanced Real-time Data Adapter initialized")
+            logger.info("✅ 高级实时数据适配器初始化成功")
             return True
 
         except Exception as e:
-            logger.error(f"❌ Advanced Real-time Data Adapter failed to initialize: {e}")
+            logger.error(f"❌ 高级实时数据适配器初始化失败: {e}")
             return False
 
     async def shutdown(self) -> None:
-        """Shutdown adapter"""
+        """关闭适配器"""
         try:
             self.is_running = False
 
-            # Stop monitors
+            # 停止监控组件
             await self.performance_monitor.stop()
             await self.quality_monitor.stop()
 
-            # Stop dispatcher
+            # 停止事件分发器
             await self.event_dispatcher.stop()
 
-            # Cleanup subscriptions
+            # 清理订阅
             self.subscriptions.clear()
             self.data_buffers.clear()
 
-            logger.info("Advanced Real-time Data Adapter shutdown completed")
+            logger.info("高级实时数据适配器已关闭")
 
         except Exception as e:
-            logger.error(f"Failed to shutdown adapter: {e}")
+            logger.error(f"关闭高级实时数据适配器失败: {e}")
 
     async def subscribe_symbol_data(self, symbol: str, subscription_type: SubscriptionType,
                                   callback: Callable[[str, Any], None]) -> bool:
-        """Subscribe to symbol data"""
+        """订阅品种数据"""
         try:
             subscription_key = f"{symbol}_{subscription_type.value}"
 
-            # Check existing
+            # 检查是否已订阅
             if subscription_key in self.subscriptions:
-                logger.warning(f"Symbol {symbol} already subscribed to {subscription_type.value}")
+                logger.warning(f"品种 {symbol} 已订阅 {subscription_type.value}")
                 return True
 
-            # Create subscription
+            # 创建订阅信息
             subscription = SubscriptionInfo(
                 symbol=symbol,
                 subscription_type=subscription_type,
@@ -412,64 +415,64 @@ class AdvancedRealtimeAdapter:
 
             self.subscriptions[subscription_key] = subscription
 
-            # Create buffer
+            # 创建数据缓冲区
             if symbol not in self.data_buffers:
                 self.data_buffers[symbol] = RealtimeDataBuffer(max_size=self.buffer_size)
 
-            # Dispatch event
+            # 发送订阅状态事件
             await self.event_dispatcher.dispatch_event(RealtimeEvent(
                 event_type=EventType.SUBSCRIPTION_STATUS,
                 symbol=symbol,
                 data={'status': 'subscribed', 'type': subscription_type.value}
             ))
 
-            logger.info(f"✅ Subscription successful: {symbol} {subscription_type.value}")
+            logger.info(f"✅ 订阅成功: {symbol} {subscription_type.value}")
             return True
 
         except Exception as e:
-            logger.error(f"Subscription failed for {symbol}: {e}")
+            logger.error(f"订阅失败 {symbol}: {e}")
             return False
 
     async def unsubscribe_symbol_data(self, symbol: str, subscription_type: SubscriptionType) -> bool:
-        """Unsubscribe from symbol data"""
+        """取消订阅品种数据"""
         try:
             subscription_key = f"{symbol}_{subscription_type.value}"
 
             if subscription_key not in self.subscriptions:
-                logger.warning(f"Subscription not found: {symbol} {subscription_type.value}")
+                logger.warning(f"未找到订阅: {symbol} {subscription_type.value}")
                 return False
 
-            # Remove subscription
+            # 移除订阅
             del self.subscriptions[subscription_key]
 
-            # Dispatch event
+            # 发送取消订阅事件
             await self.event_dispatcher.dispatch_event(RealtimeEvent(
                 event_type=EventType.SUBSCRIPTION_STATUS,
                 symbol=symbol,
                 data={'status': 'unsubscribed', 'type': subscription_type.value}
             ))
 
-            logger.info(f"Unsubscription successful: {symbol} {subscription_type.value}")
+            logger.info(f"取消订阅成功: {symbol} {subscription_type.value}")
             return True
 
         except Exception as e:
-            logger.error(f"Unsubscription failed for {symbol}: {e}")
+            logger.error(f"取消订阅失败 {symbol}: {e}")
             return False
 
     async def process_realtime_data(self, symbol: str, raw_data: Dict[str, Any],
                                   subscription_type: SubscriptionType) -> bool:
-        """Process real-time data"""
+        """处理实时数据"""
         try:
             start_time = time.perf_counter()
 
-            # Performance monitoring
+            # 记录性能指标
             self.performance_monitor.record_data_processing_start(symbol)
 
-            # Quality check
+            # 数据质量检查
             quality_score = self.quality_monitor.evaluate_data_quality(raw_data)
 
-            if quality_score < 0.5:
-                logger.warning(f"Data quality too low: {symbol}, score: {quality_score}")
+            if quality_score < 0.5:  # 质量过低
+                logger.warning(f"数据质量过低: {symbol}, 分数: {quality_score}")
                 await self.event_dispatcher.dispatch_event(RealtimeEvent(
                     event_type=EventType.DATA_QUALITY_ALERT,
                     symbol=symbol,
@@ -477,18 +480,18 @@ class AdvancedRealtimeAdapter:
                 ))
                 return False
 
-            # Add to buffer
+            # 添加到缓冲区
             buffer = self.data_buffers.get(symbol)
             if buffer:
                 buffer.add_data(raw_data)
 
-            # Find subscriptions
+            # 查找相关订阅
             subscription_key = f"{symbol}_{subscription_type.value}"
             subscription = self.subscriptions.get(subscription_key)
 
             if subscription and subscription.is_active:
                 try:
-                    # Trigger callback
+                    # 调用订阅回调
                     if asyncio.iscoroutinefunction(subscription.callback):
                         await subscription.callback(symbol, raw_data)
                     else:
@@ -496,7 +499,7 @@ class AdvancedRealtimeAdapter:
 
                     subscription.last_update_time = time.time()
 
-                    # Dispatch data update event
+                    # 发送数据更新事件
                     await self.event_dispatcher.dispatch_event(RealtimeEvent(
                         event_type=EventType.DATA_UPDATE,
                         symbol=symbol,
@@ -509,26 +512,26 @@ class AdvancedRealtimeAdapter:
                     ))
 
                 except Exception as e:
-                    logger.error(f"Subscription callback failed for {symbol}: {e}")
+                    logger.error(f"调用订阅回调失败 {symbol}: {e}")
                     subscription.error_count += 1
 
-                    # Suspend if too many errors
+                    # 如果错误次数过多，暂停订阅
                     if subscription.error_count > 10:
                         subscription.is_active = False
-                        logger.warning(f"Subscription {symbol} suspended due to excessive errors")
+                        logger.warning(f"订阅 {symbol} 因错误过多被暂停")
 
-            # Performance monitoring
+            # 记录性能指标
             processing_time = (time.perf_counter() - start_time) * 1000
             self.performance_monitor.record_data_processing_end(symbol, processing_time)
 
             return True
 
         except Exception as e:
-            logger.error(f"Failed to process real-time data for {symbol}: {e}")
+            logger.error(f"处理实时数据失败 {symbol}: {e}")
             return False
 
     def get_symbol_buffer_data(self, symbol: str, count: int = 100) -> List[Tuple[float, Any]]:
-        """Get buffered data for symbol"""
+        """获取品种缓冲数据"""
         try:
             buffer = self.data_buffers.get(symbol)
             if buffer:
@@ -536,11 +539,11 @@ class AdvancedRealtimeAdapter:
             return []
 
         except Exception as e:
-            logger.error(f"Failed to get buffered data for {symbol}: {e}")
+            logger.error(f"获取缓冲数据失败 {symbol}: {e}")
             return []
 
     def get_subscription_status(self) -> Dict[str, Any]:
-        """Get subscription status"""
+        """获取订阅状态"""
         try:
             active_subscriptions = sum(1 for sub in self.subscriptions.values() if sub.is_active)
             total_subscriptions = len(self.subscriptions)
@@ -566,11 +569,11 @@ class AdvancedRealtimeAdapter:
             }
 
         except Exception as e:
-            logger.error(f"Failed to get subscription status: {e}")
+            logger.error(f"获取订阅状态失败: {e}")
             return {}
 
     def get_comprehensive_stats(self) -> Dict[str, Any]:
-        """Get comprehensive statistics"""
+        """获取综合统计"""
         return {
             'subscription_status': self.get_subscription_status(),
             'event_stats': self.event_dispatcher.get_event_stats(),
@@ -581,7 +584,7 @@ class AdvancedRealtimeAdapter:
 
 
 class PerformanceMonitor:
-    """Performance Monitor"""
+    """性能监控器"""
 
     def __init__(self):
         self.processing_times: Dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
@@ -590,17 +593,21 @@ class PerformanceMonitor:
         self.is_running = False
 
     async def start(self) -> None:
+        """启动性能监控"""
         self.is_running = True
-        logger.info("Performance monitor started")
+        logger.info("性能监控器已启动")
 
     async def stop(self) -> None:
+        """停止性能监控"""
         self.is_running = False
-        logger.info("Performance monitor stopped")
+        logger.info("性能监控器已停止")
 
     def record_data_processing_start(self, symbol: str) -> None:
+        """记录数据处理开始"""
         self.start_times[symbol] = time.perf_counter()
 
     def record_data_processing_end(self, symbol: str, processing_time_ms: float) -> None:
+        """记录数据处理结束"""
         if symbol in self.start_times:
             del self.start_times[symbol]
 
@@ -608,7 +615,7 @@ class PerformanceMonitor:
         self.throughput_counters[symbol] += 1
 
     def get_performance_stats(self) -> Dict[str, Any]:
-        """Get performance statistics"""
+        """获取性能统计"""
         try:
             stats = {
                 'symbols': {},
@@ -644,12 +651,12 @@ class PerformanceMonitor:
             return stats
 
         except Exception as e:
-            logger.error(f"Failed to get performance stats: {e}")
+            logger.error(f"获取性能统计失败: {e}")
             return {}
 
 
 class DataQualityMonitor:
-    """Data Quality Monitor"""
+    """数据质量监控器"""
 
     def __init__(self):
         self.quality_scores: Dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
@@ -657,24 +664,26 @@ class DataQualityMonitor:
         self.is_running = False
 
     async def start(self) -> None:
+        """启动质量监控"""
         self.is_running = True
-        logger.info("Data quality monitor started")
+        logger.info("数据质量监控器已启动")
 
     async def stop(self) -> None:
+        """停止质量监控"""
         self.is_running = False
-        logger.info("Data quality monitor stopped")
+        logger.info("数据质量监控器已停止")
 
     def evaluate_data_quality(self, data: Dict[str, Any]) -> float:
-        """Evaluate data quality"""
+        """评估数据质量"""
         try:
             score = 1.0
 
-            # Check required fields
+            # 检查必需字段
             required_fields = ['time', 'open', 'high', 'low', 'close']
             missing_fields = sum(1 for field in required_fields if field not in data)
             score *= (1 - missing_fields * 0.2)
 
-            # Check data validity
+            # 检查数据有效性
             if 'open' in data and 'high' in data and 'low' in data and 'close' in data:
                 try:
                     open_price = float(data['open'])
@@ -682,27 +691,27 @@ class DataQualityMonitor:
                     low_price = float(data['low'])
                     close_price = float(data['close'])
 
-                    # Check logic
+                    # 检查价格逻辑
                     if high_price < max(open_price, close_price) or low_price > min(open_price, close_price):
                         score *= 0.5
 
-                    # Check positive
+                    # 检查价格为正数
                     if any(price <= 0 for price in [open_price, high_price, low_price, close_price]):
                         score *= 0.3
 
                 except (ValueError, TypeError):
                     score *= 0.4
 
-            # Check timestamp
+            # 检查时间戳
             if 'time' in data:
                 try:
                     timestamp = float(data['time'])
                     current_time = time.time()
                     time_diff = abs(current_time - timestamp)
 
-                    if time_diff > 3600:  # > 1 hour
+                    if time_diff > 3600:  # 超过1小时
                         score *= 0.7
-                    elif time_diff > 300:  # > 5 minutes
+                    elif time_diff > 300:  # 超过5分钟
                         score *= 0.9
 
                 except (ValueError, TypeError):
@@ -711,17 +720,18 @@ class DataQualityMonitor:
             return max(0.0, min(1.0, score))
 
         except Exception as e:
-            logger.error(f"Failed to evaluate data quality: {e}")
+            logger.error(f"评估数据质量失败: {e}")
             return 0.5
 
     def record_quality_score(self, symbol: str, score: float) -> None:
+        """记录质量分数"""
         self.quality_scores[symbol].append(score)
 
         if score < 0.5:
             self.quality_alerts_count[symbol] += 1
 
     def get_quality_stats(self) -> Dict[str, Any]:
-        """Get quality statistics"""
+        """获取质量统计"""
         try:
             stats = {
                 'symbols': {},
@@ -753,32 +763,36 @@ class DataQualityMonitor:
             return stats
 
         except Exception as e:
-            logger.error(f"Failed to get quality stats: {e}")
+            logger.error(f"获取质量统计失败: {e}")
             return {}
 
 
-# Helper functions
+# 便捷函数
 def create_realtime_adapter(buffer_size: int = 1000, max_workers: int = 4) -> AdvancedRealtimeAdapter:
-    """Create advanced real-time data adapter"""
+    """创建高级实时数据适配器"""
     return AdvancedRealtimeAdapter(buffer_size=buffer_size, max_workers=max_workers)
 
 
 async def test_realtime_adapter():
-    """Test real-time data adapter"""
+    """测试实时数据适配器"""
     adapter = create_realtime_adapter()
 
     try:
+        # 初始化适配器
         await adapter.initialize()
 
+        # 定义数据回调
         async def on_kline_data(symbol: str, data: Dict[str, Any]):
-            print(f"Received K-line data: {symbol} {data['close']}")
+            print(f"收到K线数据: {symbol} {data['close']}")
 
+        # 订阅BTC 15分钟K线
         await adapter.subscribe_symbol_data(
             "BTC/USDT",
             SubscriptionType.KLINE_15M,
             on_kline_data
         )
 
+        # 模拟接收数据
         test_data = {
             'time': time.time(),
             'open': 50000.0,
@@ -788,15 +802,20 @@ async def test_realtime_adapter():
             'volume': 1000.0
         }
 
+        # 处理测试数据
         await adapter.process_realtime_data("BTC/USDT", test_data, SubscriptionType.KLINE_15M)
+
+        # 等待处理完成
         await asyncio.sleep(1)
 
+        # 获取统计信息
         stats = adapter.get_comprehensive_stats()
-        print(f"Adapter Statistics: {json.dumps(stats, indent=2, default=str)}")
+        print(f"适配器统计: {json.dumps(stats, indent=2, default=str)}")
 
     finally:
         await adapter.shutdown()
 
 
 if __name__ == "__main__":
+    # 运行测试
     asyncio.run(test_realtime_adapter())

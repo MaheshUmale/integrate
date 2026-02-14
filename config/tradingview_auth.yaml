@@ -1,4 +1,4 @@
 accounts: []
 config_version: '1.0'
-default_account: null
+default_account: one
 encryption_enabled: false

@@ -5,6 +5,10 @@
 TradingView Account Configuration Manager
 Supports environment variable priority and persistent configuration file storage.
 """
+import rookiepy
+from typing import Optional
+from dataclasses import dataclass
+from datetime import datetime
 
 import os
 import json
@@ -161,9 +165,6 @@ class TradingViewAuthManager:
         # Env config cache
         self._env_config_cache: Optional[TradingViewAccount] = None
 
-        # Browser config cache
-        self._browser_config_cache: Optional[TradingViewAccount] = None
-
         # Load config
         self._load_config()
 
@@ -275,37 +276,9 @@ class TradingViewAuthManager:
 
         return None
 
-    def _get_browser_config(self) -> Optional[TradingViewAccount]:
-        """Retrieve configuration from Brave browser using rookiepy"""
-        if self._browser_config_cache:
-            return self._browser_config_cache
 
-        try:
-            import rookiepy
-            raw_cookies = rookiepy.brave(['.tradingview.com'])
-            if raw_cookies:
-                session_token = next((c['value'] for c in raw_cookies if c['name'] == 'sessionid'), None)
-                signature = next((c['value'] for c in raw_cookies if c['name'] == 'sessionid_sign'), None)
 
-                if session_token and signature:
-                    # Automatically set environment variables as requested
-                    os.environ['TV_SESSION'] = session_token
-                    os.environ['TV_SIGNATURE'] = signature
 
-                    self._browser_config_cache = TradingViewAccount(
-                        name="brave_browser",
-                        session_token=session_token,
-                        signature=signature,
-                        server="data",
-                        description="Configuration extracted from Brave browser",
-                        is_active=True
-                    )
-                    logger.info("Successfully extracted TradingView session from Brave browser and set environment variables")
-                    return self._browser_config_cache
-        except Exception as e:
-            logger.debug(f"Failed to extract session from browser: {e}")
-
-        return None
 
     def get_account(self, account_name: Optional[str] = None) -> Optional[TradingViewAccount]:
         """
@@ -315,40 +288,63 @@ class TradingViewAuthManager:
             account_name: Account name (None for default)
 
         Returns:
-            TradingViewAccount: Found configuration. Priority: Env > Explicit Name > Browser > Default
+            TradingViewAccount: Found configuration. Priority: Env > Explicit Name > Default
         """
+
+        try:
+            cookies = rookiepy.brave(['.tradingview.com'])
+            if cookies:
+                # Map cookies to your class fields
+                session_token = next((c['value'] for c in cookies if c['name'] == 'sessionid'), "")
+                # TradingView signatures usually start with 'v3:'
+                signature = next((c['value'] for c in cookies if c['name'] == 'sessionid_sign'), "")
+
+                tv_acct= TradingViewAccount(
+                    name=account_name or "brave_browser",
+                    session_token=session_token,
+                    signature=signature,
+                    created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                )
+
+                self._env_config_cache = tv_acct
+        except Exception as e:
+            logger.debug(f"Failed to fetch cookies from Brave: {e}")
+
+
+
         # 1. Environment variable priority
         env_config = self._get_env_config()
         if env_config:
             env_config.update_last_used()
             return env_config
 
-        # 2. Find specific account in config file
-        if account_name and self.auth_config:
+        # 2. Check config file
+        if not self.auth_config or not self.auth_config.accounts:
+            logger.warning("No TradingView account configurations available")
+            return None
+
+        # 3. Find specific account
+        if account_name:
             for account in self.auth_config.accounts:
                 if account.name == account_name and account.is_active:
                     account.update_last_used()
                     return account
 
-        # 3. Check Brave browser fallback
-        browser_config = self._get_browser_config()
-        if browser_config:
-            browser_config.update_last_used()
-            return browser_config
+            logger.warning(f"Specified account not found: {account_name}")
+            return None
 
-        # 4. Use default account from config file
-        if self.auth_config:
-            if self.auth_config.default_account:
-                for account in self.auth_config.accounts:
-                    if account.name == self.auth_config.default_account and account.is_active:
-                        account.update_last_used()
-                        return account
-
-            # 5. Fallback to first active account in config file
+        # 4. Use default account
+        if self.auth_config.default_account:
             for account in self.auth_config.accounts:
-                if account.is_active:
+                if account.name == self.auth_config.default_account and account.is_active:
                     account.update_last_used()
                     return account
+
+        # 5. Fallback to first active account
+        for account in self.auth_config.accounts:
+            if account.is_active:
+                account.update_last_used()
+                return account
 
         logger.warning("No active accounts found")
         return None
@@ -471,18 +467,6 @@ class TradingViewAuthManager:
                 'is_active': env_config.is_active,
                 'source': 'environment',
                 'is_default': True
-            })
-
-        # Browser config
-        browser_config = self._get_browser_config()
-        if browser_config:
-            accounts_info.append({
-                'name': browser_config.name,
-                'server': browser_config.server,
-                'description': browser_config.description,
-                'is_active': browser_config.is_active,
-                'source': 'browser',
-                'is_default': False
             })
 
         # Config file accounts
@@ -733,6 +717,6 @@ def auto_login_from_brave():
                 os.environ['TV_SIGNATURE'] = signature
                 logger.info("Successfully auto-logged in from Brave browser")
                 return True
-    except Exception as e:
-        logger.error(f"Auto-login from Brave failed: {e}")
+    except (ImportError, Exception) as e:
+        logger.debug(f"Auto-login from Brave failed: {e}")
     return False
