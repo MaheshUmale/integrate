@@ -49,9 +49,6 @@ handler.stream = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering
 
 logging.getLogger().addHandler(handler)
 
-print(TV_COOKIE)
-logger.info(TV_COOKIE)
-
 
 # Import TradingView Enhanced Manager
 import sys

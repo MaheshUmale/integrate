@@ -19,12 +19,6 @@ async def main():
     获取用户信息示例
 
     如需登录获取更多数据，请提供token(SESSION)和signature
-
-    sessionid
-    b7dc5nugsk5td47u39wiolrj1iy0u544
-
-    sessionid_sign
-    v3:goGfCVtvE/NAUTmU4Kk+NhmPgfgIDk9mozUpMgUf77E=
     """
     print("TradingView 用户登录示例")
     print("------------------------")
