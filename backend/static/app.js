@@ -60,7 +60,7 @@ class ChartInstance {
         this.oiData = null;
         this.showOiProfile = document.getElementById('oiProfileToggle')?.checked || false;
         this.lastUpdatedTime = 0;
-        this.isWidgetMode = true; // Default to TradingView Widget mode
+        this.isWidgetMode = false; // Default to Lightweight Charts for NSE support
 
         // Replay State
         this.isReplayMode = false;
@@ -79,24 +79,83 @@ class ChartInstance {
         const container = document.getElementById(this.containerId);
         if (!container) return;
 
-        // Implementation of COMPLETE TRADINGVIEW UI (Advanced Widget)
-        // This replaces LightweightCharts implementation
         const theme = localStorage.getItem('theme') || 'light';
-
         container.innerHTML = '';
-        const widgetId = `tv_widget_${this.index}`;
-        const widgetDiv = document.createElement('div');
-        widgetDiv.id = widgetId;
-        widgetDiv.style.height = '100%';
-        widgetDiv.style.width = '100%';
-        container.appendChild(widgetDiv);
 
-        await this.loadWidget(widgetId, theme);
+        if (this.isWidgetMode) {
+            const widgetId = `tv_widget_${this.index}`;
+            const widgetDiv = document.createElement('div');
+            widgetDiv.id = widgetId;
+            widgetDiv.style.height = '100%';
+            widgetDiv.style.width = '100%';
+            container.appendChild(widgetDiv);
+            await this.loadWidget(widgetId, theme);
+        } else {
+            // Initialize Lightweight Charts
+            this.chart = LightweightCharts.createChart(container, {
+                layout: {
+                    background: { color: theme === 'dark' ? '#0f172a' : '#ffffff' },
+                    textColor: theme === 'dark' ? '#94a3b8' : '#475569',
+                },
+                grid: {
+                    vertLines: { color: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+                    horzLines: { color: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
+                },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                rightPriceScale: { borderColor: theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' },
+                timeScale: { borderColor: theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)', timeVisible: true, secondsVisible: false },
+            });
+
+            this.setChartType(this.chartType);
+            this.volumeSeries = this.chart.addHistogramSeries({
+                color: '#26a69a',
+                priceFormat: { type: 'volume' },
+                priceScaleId: '', // Overlay mode
+            });
+            this.volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+
+            // Create OI Overlay Canvas
+            this.oiCanvas = document.createElement('canvas');
+            this.oiCanvas.className = 'oi-profile-canvas';
+            container.appendChild(this.oiCanvas);
+            this.syncOiCanvas();
+
+            // Initial load
+            this.fetchHistory();
+        }
 
         // Handle focus
         container.parentElement.addEventListener('mousedown', () => {
             setActiveChart(this);
         });
+    }
+
+    async fetchHistory() {
+        if (this.isWidgetMode) return;
+        setLoading(true);
+        try {
+            const data = await fetchIntraday(this.symbol, this.interval);
+            if (data.candles) {
+                this.fullHistory.candles.clear();
+                this.fullHistory.volume.clear();
+                data.candles.forEach(c => {
+                    const ts = Math.floor(new Date(c.timestamp).getTime() / 1000);
+                    this.fullHistory.candles.set(ts, {
+                        time: ts, open: c.open, high: c.high, low: c.low, close: c.close
+                    });
+                    this.fullHistory.volume.set(ts, {
+                        time: ts, value: c.volume,
+                        color: c.close >= c.open ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
+                    });
+                });
+                this.renderData();
+                if (this.showOiProfile) this.fetchOiProfile();
+
+                // Subscribe to real-time updates
+                socket.emit('subscribe', { instrumentKeys: [this.symbol], interval: this.interval });
+            }
+        } catch (e) { console.error("History fetch failed:", e); }
+        setLoading(false);
     }
 
     async loadWidget(containerId, theme) {
@@ -242,19 +301,12 @@ class ChartInstance {
         if (symbol) this.symbol = symbol.toUpperCase();
         if (interval) this.interval = interval;
 
-        const theme = localStorage.getItem('theme') || 'light';
-        const widgetId = `tv_widget_${this.index}`;
-
-        const container = document.getElementById(this.containerId);
-        if (container) {
-            container.innerHTML = '';
-            const widgetDiv = document.createElement('div');
-            widgetDiv.id = widgetId;
-            widgetDiv.style.height = '100%';
-            widgetDiv.style.width = '100%';
-            container.appendChild(widgetDiv);
-            await this.loadWidget(widgetId, theme);
+        if (this.chart) {
+            this.chart.remove();
+            this.chart = null;
         }
+
+        await this.initChart();
 
         if (this.showOiProfile) this.fetchOiProfile();
         updateActiveChartLabel();
@@ -678,6 +730,7 @@ function init() {
     initAnalysisSidebar();
     initTheme();
     initSocket();
+    initDataSourceSelector();
 
     window.addEventListener('resize', () => {
         charts.forEach(c => {
@@ -717,6 +770,24 @@ function initAnalysisSidebar() {
             if (c.showOiProfile) c.fetchOiProfile();
             else c.renderOiProfile();
         });
+    });
+}
+
+function initDataSourceSelector() {
+    const selector = document.getElementById('dataSourceSelector');
+    if (!selector) return;
+
+    selector.addEventListener('change', (e) => {
+        const isWidget = e.target.value === 'widget';
+        charts.forEach(c => {
+            c.isWidgetMode = isWidget;
+            if (c.chart) {
+                c.chart.remove();
+                c.chart = null;
+            }
+            c.initChart();
+        });
+        saveLayout();
     });
 }
 
@@ -1185,17 +1256,11 @@ function applyTheme(theme) {
     }
 
     charts.forEach(c => {
-        const widgetId = `tv_widget_${c.index}`;
-        const container = document.getElementById(c.containerId);
-        if (container) {
-            container.innerHTML = '';
-            const widgetDiv = document.createElement('div');
-            widgetDiv.id = widgetId;
-            widgetDiv.style.height = '100%';
-            widgetDiv.style.width = '100%';
-            container.appendChild(widgetDiv);
-            c.loadWidget(widgetId, theme);
+        if (c.chart) {
+            c.chart.remove();
+            c.chart = null;
         }
+        c.initChart();
     });
 }
 
