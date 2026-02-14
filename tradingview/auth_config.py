@@ -303,6 +303,7 @@ class TradingViewAuthManager:
                     name=account_name or "brave_browser",
                     session_token=session_token,
                     signature=signature,
+                    server="prodata", # Use prodata for better index support
                     created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 )
 
@@ -707,16 +708,47 @@ def auto_login_from_brave():
     """
     try:
         import rookiepy
+        # Try to get cookies from all profiles to find the most recent/valid one
         raw_cookies = rookiepy.brave(['.tradingview.com'])
         if raw_cookies:
-            session_token = next((c['value'] for c in raw_cookies if c['name'] == 'sessionid'), None)
-            signature = next((c['value'] for c in raw_cookies if c['name'] == 'sessionid_sign'), None)
+            # We look for sessionid and sessionid_sign
+            # If there are multiple, we try to find the one that looks most like a session
+            # (usually longest or most recent, but rookiepy doesn't give timestamps easily)
+
+            # Filter all sessionids
+            sessions = [c for c in raw_cookies if c['name'] == 'sessionid']
+            signatures = [c for c in raw_cookies if c['name'] == 'sessionid_sign']
+
+            if not sessions or not signatures:
+                logger.warning("No TradingView session cookies found in Brave browser")
+                return False
+
+            # Use the first ones found for now, but log their existence
+            session_token = sessions[0]['value']
+            signature = signatures[0]['value']
 
             if session_token and signature:
                 os.environ['TV_SESSION'] = session_token
                 os.environ['TV_SIGNATURE'] = signature
-                logger.info("Successfully auto-logged in from Brave browser")
+                os.environ['TV_SERVER'] = 'prodata' # Use prodata for indices
+
+                # Also update manager cache if it exists
+                global _auth_manager
+                if _auth_manager:
+                    _auth_manager._env_config_cache = TradingViewAccount(
+                        name="brave_auto",
+                        session_token=session_token,
+                        signature=signature,
+                        server="prodata",
+                        description="Auto-logged from Brave"
+                    )
+
+                logger.info(f"Successfully auto-logged in from Brave browser (Session: {session_token[:4]}...{session_token[-4:]})")
                 return True
-    except (ImportError, Exception) as e:
-        logger.debug(f"Auto-login from Brave failed: {e}")
+        else:
+            logger.warning("Brave browser returned no cookies for .tradingview.com")
+    except ImportError:
+        logger.error("rookiepy not installed. Cannot auto-login from Brave.")
+    except Exception as e:
+        logger.error(f"Auto-login from Brave failed with error: {e}")
     return False

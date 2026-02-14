@@ -5,6 +5,33 @@
 
 const socket = io();
 
+// --- TradingView Script Loader ---
+let tvScriptPromise = null;
+function loadTvScript() {
+    if (tvScriptPromise) return tvScriptPromise;
+
+    tvScriptPromise = new Promise((resolve) => {
+        if (typeof TradingView !== 'undefined' && TradingView.widget) {
+            resolve();
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = 'https://s3.tradingview.com/tv.js';
+        script.onload = () => {
+            const poll = () => {
+                if (typeof TradingView !== 'undefined' && TradingView.widget) {
+                    resolve();
+                } else {
+                    setTimeout(poll, 100);
+                }
+            };
+            poll();
+        };
+        document.head.appendChild(script);
+    });
+    return tvScriptPromise;
+}
+
 // --- ChartInstance Class ---
 class ChartInstance {
     constructor(containerId, index) {
@@ -48,7 +75,7 @@ class ChartInstance {
         this.initChart();
     }
 
-    initChart() {
+    async initChart() {
         const container = document.getElementById(this.containerId);
         if (!container) return;
 
@@ -64,26 +91,7 @@ class ChartInstance {
         widgetDiv.style.width = '100%';
         container.appendChild(widgetDiv);
 
-        if (typeof TradingView === 'undefined') {
-            if (!window._tvScriptLoading) {
-                window._tvScriptLoading = true;
-                const script = document.createElement('script');
-                script.src = 'https://s3.tradingview.com/tv.js';
-                script.onload = () => {
-                    window._tvScriptLoading = false;
-                    this.loadWidget(widgetId, theme);
-                    // Also trigger for other charts that might be waiting
-                    window.dispatchEvent(new Event('tv-script-loaded'));
-                };
-                document.head.appendChild(script);
-            } else {
-                window.addEventListener('tv-script-loaded', () => {
-                    this.loadWidget(widgetId, theme);
-                }, { once: true });
-            }
-        } else {
-            this.loadWidget(widgetId, theme);
-        }
+        await this.loadWidget(widgetId, theme);
 
         // Handle focus
         container.parentElement.addEventListener('mousedown', () => {
@@ -91,7 +99,9 @@ class ChartInstance {
         });
     }
 
-    loadWidget(containerId, theme) {
+    async loadWidget(containerId, theme) {
+        await loadTvScript();
+
         // Ensure symbol is in a format TV likes
         let tvSymbol = this.symbol;
         if (tvSymbol.includes(':')) {
@@ -243,7 +253,7 @@ class ChartInstance {
             widgetDiv.style.height = '100%';
             widgetDiv.style.width = '100%';
             container.appendChild(widgetDiv);
-            this.loadWidget(widgetId, theme);
+            await this.loadWidget(widgetId, theme);
         }
 
         if (this.showOiProfile) this.fetchOiProfile();
