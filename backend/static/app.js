@@ -17,6 +17,11 @@ function loadTvScript() {
         }
         const script = document.createElement('script');
         script.src = 'https://s3.tradingview.com/tv.js';
+        script.onerror = () => {
+            console.error("Failed to load TradingView script");
+            tvScriptPromise = null; // Allow retry
+            resolve(); // Resolve anyway to avoid hanging, but TradingView will be undefined
+        };
         script.onload = () => {
             const poll = () => {
                 if (typeof TradingView !== 'undefined' && TradingView.widget) {
@@ -135,17 +140,20 @@ class ChartInstance {
         setLoading(true);
         try {
             const data = await fetchIntraday(this.symbol, this.interval);
-            if (data.candles) {
+            if (data.candles && data.candles.length > 0) {
                 this.fullHistory.candles.clear();
                 this.fullHistory.volume.clear();
                 data.candles.forEach(c => {
-                    const ts = Math.floor(new Date(c.timestamp).getTime() / 1000);
+                    // Correctly handle timestamps (seconds vs milliseconds)
+                    let ts = Number(c.timestamp);
+                    if (ts > 1e11) ts = Math.floor(ts / 1000); // Convert ms to s
+
                     this.fullHistory.candles.set(ts, {
-                        time: ts, open: c.open, high: c.high, low: c.low, close: c.close
+                        time: ts, open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close)
                     });
                     this.fullHistory.volume.set(ts, {
-                        time: ts, value: c.volume,
-                        color: c.close >= c.open ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
+                        time: ts, value: Number(c.volume),
+                        color: Number(c.close) >= Number(c.open) ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
                     });
                 });
                 this.renderData();
@@ -160,6 +168,12 @@ class ChartInstance {
 
     async loadWidget(containerId, theme) {
         await loadTvScript();
+        if (typeof TradingView === 'undefined' || !TradingView.widget) {
+            console.error("TradingView script not available");
+            const container = document.getElementById(containerId);
+            if (container) container.innerHTML = '<div class="p-4 text-red-500">TradingView Library Load Failed</div>';
+            return;
+        }
 
         // Ensure symbol is in a format TV likes
         let tvSymbol = this.symbol;
@@ -259,7 +273,7 @@ class ChartInstance {
     }
 
     renderOiProfile() {
-        if (this.isWidgetMode || !this.oiCanvas) return;
+        if (this.isWidgetMode || !this.oiCanvas || !this.mainSeries) return;
         const ctx = this.oiCanvas.getContext('2d');
         ctx.clearRect(0, 0, this.oiCanvas.width, this.oiCanvas.height);
         if (!this.showOiProfile || !this.oiData || this.oiData.length === 0) return;
@@ -314,16 +328,29 @@ class ChartInstance {
     }
 
     renderData() {
-        if (this.isWidgetMode || this.fullHistory.candles.size === 0) return;
-        let displayCandles = Array.from(this.fullHistory.candles.values()).sort((a, b) => a.time - b.time);
+        if (this.isWidgetMode || this.fullHistory.candles.size === 0 || !this.mainSeries) return;
+
+        let displayCandles = Array.from(this.fullHistory.candles.values())
+            .filter(c => c && !isNaN(c.time))
+            .sort((a, b) => a.time - b.time);
+
+        if (displayCandles.length === 0) return;
+
         if (!displayCandles.some(c => c.hasExplicitColor)) {
             displayCandles = applyRvolColoring(displayCandles);
         }
-        this.mainSeries.setData(displayCandles);
-        this.volumeSeries.setData(Array.from(this.fullHistory.volume.values()).sort((a, b) => a.time - b.time));
 
-        if (displayCandles.length > 0) {
+        try {
+            this.mainSeries.setData(displayCandles);
+
+            const displayVolume = Array.from(this.fullHistory.volume.values())
+                .filter(v => v && !isNaN(v.time))
+                .sort((a, b) => a.time - b.time);
+            this.volumeSeries.setData(displayVolume);
+
             this.lastUpdatedTime = displayCandles[displayCandles.length - 1].time;
+        } catch (e) {
+            console.error("Error setting data in Lightweight Charts:", e, displayCandles[0]);
         }
 
         // Restore indicators
@@ -375,22 +402,29 @@ class ChartInstance {
     }
 
     handleChartUpdate(data) {
-        if (this.isWidgetMode) return;
+        if (this.isWidgetMode || !data) return;
 
         if (data.ohlcv && data.ohlcv.length > 0) {
-            const isTimestamp = data.ohlcv[0][0] > 1e9;
+            // Validate data format (handle list of lists)
+            const first = data.ohlcv[0];
+            if (!Array.isArray(first)) return;
+
+            const isTimestamp = first[0] > 1e9;
             if (isTimestamp) {
                 const candles = data.ohlcv.map(v => ({
                     time: Math.floor(v[0]), open: Number(v[1]), high: Number(v[2]), low: Number(v[3]), close: Number(v[4])
-                })).filter(c => !isNaN(c.open) && c.open > 0);
+                })).filter(c => !isNaN(c.open) && c.open > 0 && !isNaN(c.time));
+
                 const vol = data.ohlcv.map(v => ({
                     time: Math.floor(v[0]), value: Number(v[5]),
                     color: Number(v[4]) >= Number(v[1]) ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
-                }));
+                })).filter(v => !isNaN(v.time));
 
                 candles.forEach((c, idx) => {
-                    this.fullHistory.candles.set(c.time, c);
-                    this.fullHistory.volume.set(vol[idx].time, vol[idx]);
+                    if (vol[idx]) {
+                        this.fullHistory.candles.set(c.time, c);
+                        this.fullHistory.volume.set(vol[idx].time, vol[idx]);
+                    }
                 });
 
                 // Maintain history limit
@@ -1053,8 +1087,9 @@ function initSocket() {
         for (const [key, quote] of Object.entries(data)) {
             const incomingKey = key.toUpperCase();
             charts.forEach(c => {
-                // Strict match on technical instrument key to avoid data mixups
-                if (c.symbol && c.symbol.toUpperCase() === incomingKey) {
+                // Robust matching: either exact technical key or normalized base symbol
+                if (c.symbol && (c.symbol.toUpperCase() === incomingKey ||
+                    normalizeSymbol(c.symbol) === normalizeSymbol(incomingKey))) {
                     c.updateRealtimeCandle(quote);
                 }
             });
@@ -1105,8 +1140,10 @@ function initSocket() {
         const updateKey = (data.instrumentKey || "").toUpperCase();
         const updateInterval = String(data.interval || "");
         charts.forEach(c => {
-            // Strict match on technical instrument key and interval
-            if (c.symbol && c.symbol.toUpperCase() === updateKey && String(c.interval) === updateInterval) {
+            // Robust matching: either exact technical key or normalized base symbol, plus interval check
+            if (c.symbol && (c.symbol.toUpperCase() === updateKey ||
+                normalizeSymbol(c.symbol) === normalizeSymbol(updateKey)) &&
+                String(c.interval) === updateInterval) {
                 c.handleChartUpdate(data);
             }
         });
@@ -1168,7 +1205,13 @@ function normalizeSymbol(sym) {
     let s = String(sym).toUpperCase().trim();
     if (s.includes(':')) s = s.split(':')[1];
     if (s.includes('|')) s = s.split('|')[1];
-    return s.split(' ')[0].replace("NIFTY 50", "NIFTY").replace("BANK NIFTY", "BANKNIFTY").replace("FIN NIFTY", "FINNIFTY");
+    s = s.split(' ')[0].replace("NIFTY 50", "NIFTY").replace("BANK NIFTY", "BANKNIFTY").replace("FIN NIFTY", "FINNIFTY");
+
+    // Technical to Human mapping for indices
+    if (s === 'CNXFINANCE') return 'FINNIFTY';
+    if (s === 'INDIAVIX') return 'INDIA VIX';
+
+    return s;
 }
 
 function rgbaToHex(rgba) {

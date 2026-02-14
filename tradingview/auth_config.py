@@ -743,9 +743,11 @@ def auto_login_from_brave():
                         description="Auto-logged from Brave"
                     )
 
+                print(f"Successfully retrieved TradingView session tokens from Brave browser.")
                 logger.info(f"Successfully auto-logged in from Brave browser (Session: {session_token[:4]}...{session_token[-4:]})")
                 return True
         else:
+            print("Brave browser returned no cookies for .tradingview.com. Please ensure you are logged into TradingView in Brave.")
             logger.warning("Brave browser returned no cookies for .tradingview.com")
     except ImportError:
         logger.error("rookiepy not installed. Cannot auto-login from Brave.")

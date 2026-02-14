@@ -102,6 +102,7 @@ class EnhancedTradingViewProvider(ILiveStreamProvider, IHistoricalDataProvider):
 
     async def get_hist_candles(self, symbol: str, interval: str, count: int) -> List[List]:
         """Fetch historical candles using the enhanced client."""
+        chart = None
         try:
             chart = self.client.Session.Chart()
             # ChartSession has a get_historical_data convenience method
@@ -111,6 +112,12 @@ class EnhancedTradingViewProvider(ILiveStreamProvider, IHistoricalDataProvider):
         except Exception as e:
             logger.error(f"Error fetching historical candles from Enhanced TV: {e}")
             return []
+        finally:
+            if chart:
+                try:
+                    chart.delete()
+                except:
+                    pass
 
     async def get_indicators(self, symbol: str, interval: str, indicator_id: str, options: Dict = None) -> List[Dict]:
         """
@@ -137,9 +144,9 @@ class EnhancedTradingViewProvider(ILiveStreamProvider, IHistoricalDataProvider):
 
             study.on_update(on_study_update)
 
-            # Wait with a timeout
+            # Wait with a timeout (increased for reliability)
             try:
-                await asyncio.wait_for(data_event.wait(), timeout=10.0)
+                await asyncio.wait_for(data_event.wait(), timeout=20.0)
                 return [p.__dict__ for p in study.periods]
             except asyncio.TimeoutError:
                 logger.warning(f"Timeout waiting for indicator data: {indicator_id} for {symbol}")
