@@ -590,7 +590,7 @@ class ChartSession:
             self.set_market(symbol, {'timeframe': tf_value, 'range': count})
 
             try:
-                return await asyncio.wait_for(data_future, timeout=20.0)
+                return await asyncio.wait_for(data_future, timeout=30.0)
             except asyncio.TimeoutError:
                 if self._periods:
                     klines = []

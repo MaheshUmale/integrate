@@ -160,10 +160,15 @@ async def handle_subscribe(sid, data):
     interval = data.get('interval', '1')
 
     for key in instrument_keys:
-        logger.info(f"Client {sid} subscribing to: {key} ({interval}m)")
+        # Resolve technical symbol for TV backend compatibility
+        tv_key = get_tv_technical_symbol(key)
+
+        logger.info(f"Client {sid} subscribing to: {key} (TV Key: {tv_key}) ({interval}m)")
         try:
-            await sio.enter_room(sid, key.upper())
-            data_engine.subscribe_instrument(key.upper(), sid, interval=str(interval))
+            # Join the room for the technical symbol so data_engine emissions reach the client
+            await sio.enter_room(sid, tv_key.upper())
+            # Subscribe using technical symbol
+            data_engine.subscribe_instrument(tv_key.upper(), sid, interval=str(interval))
         except Exception as e:
             logger.error(f"Subscription error for {key}: {e}")
 
@@ -190,11 +195,12 @@ async def handle_unsubscribe(sid, data):
     interval = data.get('interval', '1')
 
     for key in instrument_keys:
-        logger.info(f"Client {sid} unsubscribing from: {key}")
+        tv_key = get_tv_technical_symbol(key)
+        logger.info(f"Client {sid} unsubscribing from: {key} (TV Key: {tv_key})")
         try:
-            data_engine.unsubscribe_instrument(key.upper(), sid, interval=str(interval))
-            if not data_engine.is_sid_using_instrument(sid, key.upper()):
-                await sio.leave_room(sid, key.upper())
+            data_engine.unsubscribe_instrument(tv_key.upper(), sid, interval=str(interval))
+            if not data_engine.is_sid_using_instrument(sid, tv_key.upper()):
+                await sio.leave_room(sid, tv_key.upper())
         except Exception as e:
             logger.error(f"Unsubscription error for {key}: {e}")
 
@@ -331,6 +337,46 @@ async def get_tv_klines(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def get_tv_technical_symbol(instrument_key: str) -> str:
+    """Resolves instrument key to a format TradingView backend likes."""
+    if not instrument_key:
+        return "NSE:NIFTY"
+
+    # Standardize input
+    s = instrument_key.upper().strip().replace('|', ':')
+
+    # Mapping for common Indian indices
+    mapping = {
+        "NIFTY": "NSE:NIFTY",
+        "BANKNIFTY": "NSE:BANKNIFTY",
+        "FINNIFTY": "NSE:CNXFINANCE",
+        "FINNIFTY INDEX": "NSE:CNXFINANCE",
+        "CNXFINANCE": "NSE:CNXFINANCE",
+        "INDIAVIX": "NSE:INDIAVIX",
+        "INDIA VIX": "NSE:INDIAVIX"
+    }
+
+    # If the exact string or its parts are in mapping
+    if s in mapping:
+        return mapping[s]
+
+    # Check without exchange prefix
+    base = s.split(':')[-1] if ':' in s else s
+    if base in mapping:
+        return mapping[base]
+
+    # Extract base symbol using mapper for more complex cases
+    sym = symbol_mapper.get_symbol(instrument_key)
+    if sym in mapping:
+        return mapping[sym]
+
+    # Default to NSE prefix for other symbols if no exchange is present
+    if ":" not in s:
+        return f"NSE:{s}"
+
+    return s
+
+
 @fastapi_app.get("/api/tv/intraday/{instrument_key}")
 async def get_intraday(instrument_key: str, interval: str = '1'):
     """Fetch intraday candles with indicators."""
@@ -338,10 +384,13 @@ async def get_intraday(instrument_key: str, interval: str = '1'):
         clean_key = unquote(instrument_key)
         hrn = symbol_mapper.get_hrn(clean_key)
 
+        # Resolve technical symbol for TV
+        tv_sym = get_tv_technical_symbol(clean_key)
+
         from core.provider_registry import historical_data_registry
         provider = historical_data_registry.get_primary()
 
-        tv_candles = await provider.get_hist_candles(clean_key, interval, 1000)
+        tv_candles = await provider.get_hist_candles(tv_sym, interval, 1000)
 
         valid_indicators = []
 
@@ -351,7 +400,7 @@ async def get_intraday(instrument_key: str, interval: str = '1'):
                 # Example: Fetch RSI and Bollinger Bands from TV
                 # Note: This is an example of the "full range of features"
                 # Fetch RSI
-                rsi_data = await provider.get_indicators(clean_key, interval, 'STD;RSI', {'length': 14})
+                rsi_data = await provider.get_indicators(tv_sym, interval, 'STD;RSI', {'length': 14})
                 if rsi_data:
                     valid_indicators.append({
                         "id": "tv_rsi",
@@ -362,7 +411,7 @@ async def get_intraday(instrument_key: str, interval: str = '1'):
                     })
 
                 # Fetch Bollinger Bands
-                bb_data = await provider.get_indicators(clean_key, interval, 'STD;BB', {'length': 20, 'mult': 2})
+                bb_data = await provider.get_indicators(tv_sym, interval, 'STD;BB', {'length': 20, 'mult': 2})
                 if bb_data:
                     # Plot 0: Basis, Plot 1: Upper, Plot 2: Lower
                     valid_indicators.append({

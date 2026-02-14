@@ -430,6 +430,11 @@ class Client:
 
                 # Handle protocol error
                 if isinstance(packet, dict) and packet.get('m') == 'protocol_error':
+                    error_data = str(packet.get('p'))
+                    # Ignore unknown session errors during deletion
+                    if "unknown_session_id" in error_data and "delete_session" in error_data:
+                        continue
+
                     self._handle_error(f"Protocol error: {packet.get('p')}")
                     try:
                         await self._ws.close()

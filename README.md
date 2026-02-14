@@ -82,7 +82,9 @@ A minimal, high-performance trading terminal featuring TradingView charting, rea
 
 ### Configuration
 
-Set TradingView credentials or session cookies in `config.py` (or via environment variables) to access private indicators and higher-granularity data.
+The system supports automated login from the **Brave Browser**. When started, it will automatically attempt to retrieve your TradingView session cookies from Brave using the `rookiepy` library.
+
+Alternatively, you can manually set TradingView credentials or session cookies in `backend/config.py` (or via environment variables `TV_SESSION` and `TV_SIGNATURE`) to access private indicators and higher-granularity data.
 
 ### Running the Server
 
