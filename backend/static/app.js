@@ -411,14 +411,22 @@ class ChartInstance {
 
             const isTimestamp = first[0] > 1e9;
             if (isTimestamp) {
-                const candles = data.ohlcv.map(v => ({
-                    time: Math.floor(v[0]), open: Number(v[1]), high: Number(v[2]), low: Number(v[3]), close: Number(v[4])
-                })).filter(c => !isNaN(c.open) && c.open > 0 && !isNaN(c.time));
+                const candles = data.ohlcv.map(v => {
+                    let ts = Number(v[0]);
+                    if (ts > 1e11) ts = Math.floor(ts / 1000);
+                    return {
+                        time: ts, open: Number(v[1]), high: Number(v[2]), low: Number(v[3]), close: Number(v[4])
+                    };
+                }).filter(c => !isNaN(c.open) && c.open > 0 && !isNaN(c.time));
 
-                const vol = data.ohlcv.map(v => ({
-                    time: Math.floor(v[0]), value: Number(v[5]),
-                    color: Number(v[4]) >= Number(v[1]) ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
-                })).filter(v => !isNaN(v.time));
+                const vol = data.ohlcv.map(v => {
+                    let ts = Number(v[0]);
+                    if (ts > 1e11) ts = Math.floor(ts / 1000);
+                    return {
+                        time: ts, value: Number(v[5]),
+                        color: Number(v[4]) >= Number(v[1]) ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
+                    };
+                }).filter(v => !isNaN(v.time));
 
                 candles.forEach((c, idx) => {
                     if (vol[idx]) {

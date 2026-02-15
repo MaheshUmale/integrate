@@ -104,12 +104,13 @@ def parse_ws_packet(data):
 
     return packets
 
-def format_ws_packet(packet):
+def format_ws_packet(packet, raw=False):
     """
     Format WebSocket data packet.
 
     Args:
         packet: Packet to be sent
+        raw: Whether to send the packet as is (without ~m~ wrapper)
 
     Returns:
         str: Formatted data, or None if formatting fails
@@ -120,6 +121,8 @@ def format_ws_packet(packet):
         else:
             msg = str(packet)
 
+        if raw:
+            return msg
         return f'~m~{len(msg)}~m~{msg}'
     except Exception:
         # Formatting failed, return None
