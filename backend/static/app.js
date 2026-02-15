@@ -65,6 +65,7 @@ class ChartInstance {
         this.oiData = null;
         this.showOiProfile = document.getElementById('oiProfileToggle')?.checked || false;
         this.lastUpdatedTime = 0;
+        this.status = 'initializing';
         this.isWidgetMode = false; // Default to Lightweight Charts for NSE support
 
         // Replay State
@@ -86,6 +87,14 @@ class ChartInstance {
 
         const theme = localStorage.getItem('theme') || 'light';
         container.innerHTML = '';
+
+        // Reset series references as they are tied to the old chart instance
+        this.mainSeries = null;
+        this.volumeSeries = null;
+        this.indicatorSeries = {};
+        this.priceLines = {};
+
+        this.updateStatus('connecting', '#fbbf24');
 
         if (this.isWidgetMode) {
             const widgetId = `tv_widget_${this.index}`;
@@ -138,6 +147,7 @@ class ChartInstance {
     async fetchHistory() {
         if (this.isWidgetMode) return;
         setLoading(true);
+        this.updateStatus('fetching', '#3b82f6');
         try {
             const data = await fetchIntraday(this.symbol, this.interval);
             if (data.candles && data.candles.length > 0) {
@@ -146,24 +156,48 @@ class ChartInstance {
                 data.candles.forEach(c => {
                     // Correctly handle timestamps (seconds vs milliseconds)
                     let ts = Number(c.timestamp);
+                    if (isNaN(ts)) return;
                     if (ts > 1e11) ts = Math.floor(ts / 1000); // Convert ms to s
 
+                    const open = Number(c.open);
+                    const close = Number(c.close);
+                    if (isNaN(open) || isNaN(close)) return;
+
                     this.fullHistory.candles.set(ts, {
-                        time: ts, open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close)
+                        time: ts, open: open, high: Number(c.high), low: Number(c.low), close: close
                     });
                     this.fullHistory.volume.set(ts, {
-                        time: ts, value: Number(c.volume),
-                        color: Number(c.close) >= Number(c.open) ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
+                        time: ts, value: Number(c.volume) || 0,
+                        color: close >= open ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
                     });
                 });
                 this.renderData();
                 if (this.showOiProfile) this.fetchOiProfile();
+                this.updateStatus('live', '#22c55e');
 
                 // Subscribe to real-time updates
                 socket.emit('subscribe', { instrumentKeys: [this.symbol], interval: this.interval });
+            } else {
+                this.updateStatus('no data', '#ef4444');
             }
-        } catch (e) { console.error("History fetch failed:", e); }
+        } catch (e) {
+            console.error("History fetch failed:", e);
+            this.updateStatus('error', '#ef4444');
+        }
         setLoading(false);
+    }
+
+    updateStatus(status, color = '#64748b') {
+        this.status = status;
+        const wrapper = document.getElementById(this.containerId).parentElement;
+        let statusEl = wrapper.querySelector('.chart-status');
+        if (!statusEl) {
+            statusEl = document.createElement('div');
+            statusEl.className = 'chart-status';
+            wrapper.appendChild(statusEl);
+        }
+        statusEl.innerText = status.toUpperCase();
+        statusEl.style.color = color;
     }
 
     async loadWidget(containerId, theme) {
@@ -273,7 +307,7 @@ class ChartInstance {
     }
 
     renderOiProfile() {
-        if (this.isWidgetMode || !this.oiCanvas || !this.mainSeries) return;
+        if (this.isWidgetMode || !this.oiCanvas || !this.mainSeries || !this.mainSeries.priceToCoordinate) return;
         const ctx = this.oiCanvas.getContext('2d');
         ctx.clearRect(0, 0, this.oiCanvas.width, this.oiCanvas.height);
         if (!this.showOiProfile || !this.oiData || this.oiData.length === 0) return;
@@ -331,7 +365,18 @@ class ChartInstance {
         if (this.isWidgetMode || this.fullHistory.candles.size === 0 || !this.mainSeries) return;
 
         let displayCandles = Array.from(this.fullHistory.candles.values())
-            .filter(c => c && !isNaN(c.time))
+            .filter(c => c && c.time !== undefined && !isNaN(c.time) && c.open !== undefined && !isNaN(c.open))
+            .map(c => ({
+                time: Number(c.time),
+                open: Number(c.open),
+                high: Number(c.high),
+                low: Number(c.low),
+                close: Number(c.close),
+                ...(c.color ? { color: c.color } : {}),
+                ...(c.wickColor ? { wickColor: c.wickColor } : {}),
+                ...(c.borderColor ? { borderColor: c.borderColor } : {}),
+                hasExplicitColor: c.hasExplicitColor
+            }))
             .sort((a, b) => a.time - b.time);
 
         if (displayCandles.length === 0) return;
@@ -344,9 +389,17 @@ class ChartInstance {
             this.mainSeries.setData(displayCandles);
 
             const displayVolume = Array.from(this.fullHistory.volume.values())
-                .filter(v => v && !isNaN(v.time))
+                .filter(v => v && v.time !== undefined && !isNaN(v.time) && v.value !== undefined && !isNaN(v.value))
+                .map(v => ({
+                    time: Number(v.time),
+                    value: Number(v.value),
+                    color: v.color
+                }))
                 .sort((a, b) => a.time - b.time);
-            this.volumeSeries.setData(displayVolume);
+
+            if (this.volumeSeries) {
+                this.volumeSeries.setData(displayVolume);
+            }
 
             this.lastUpdatedTime = displayCandles[displayCandles.length - 1].time;
         } catch (e) {
@@ -413,20 +466,22 @@ class ChartInstance {
             if (isTimestamp) {
                 const candles = data.ohlcv.map(v => {
                     let ts = Number(v[0]);
+                    if (isNaN(ts)) return null;
                     if (ts > 1e11) ts = Math.floor(ts / 1000);
                     return {
                         time: ts, open: Number(v[1]), high: Number(v[2]), low: Number(v[3]), close: Number(v[4])
                     };
-                }).filter(c => !isNaN(c.open) && c.open > 0 && !isNaN(c.time));
+                }).filter(c => c && !isNaN(c.open) && c.open > 0 && !isNaN(c.time));
 
                 const vol = data.ohlcv.map(v => {
                     let ts = Number(v[0]);
+                    if (isNaN(ts)) return null;
                     if (ts > 1e11) ts = Math.floor(ts / 1000);
                     return {
                         time: ts, value: Number(v[5]),
                         color: Number(v[4]) >= Number(v[1]) ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)'
                     };
-                }).filter(v => !isNaN(v.time));
+                }).filter(v => v && !isNaN(v.time) && !isNaN(v.value));
 
                 candles.forEach((c, idx) => {
                     if (vol[idx]) {
@@ -447,6 +502,7 @@ class ChartInstance {
 
                 if (candles.length > 0) {
                     this.lastCandle = { ...candles[candles.length - 1], volume: vol[vol.length - 1].value };
+                    this.updateStatus('live', '#22c55e');
                     if (!this.isReplayMode) {
                         if (candles.length > 10) this.renderData();
                         else {

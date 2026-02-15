@@ -72,7 +72,7 @@ class ChartSession:
         }
 
         # Create chart session
-        self._create_session_task = asyncio.create_task(self._client.send('chart_create_session', [self._session_id]))
+        self._create_session_task = asyncio.create_task(self._client.send('chart_create_session', [self._session_id, '']))
 
         # Create study factory
         self.Study = lambda indicator: ChartStudy(self, indicator)
@@ -456,6 +456,9 @@ class ChartSession:
                     params.append(calc_range)
                 else:
                     params.append('')
+
+                # Add empty options as 7th parameter for create_series/modify_series
+                params.append('')
 
                 await self._client.send(command, params)
                 self._series_created = True

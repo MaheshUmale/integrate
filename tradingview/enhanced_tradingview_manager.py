@@ -234,9 +234,10 @@ class EnhancedDataQualityManager:
 class ConnectionManager:
     """Connection Manager"""
 
-    def __init__(self):
+    def __init__(self, options: Dict = None):
         self.connections: Dict[str, Any] = {}
         self.connection_status: Dict[str, DataSourceStatus] = {}
+        self.options = options or {}
         self.connection_health: Dict[str, float] = {}
         self.max_connections = 10
         self.connection_timeout = 30
@@ -248,7 +249,11 @@ class ConnectionManager:
                 await self.close_connection(connection_id)
 
             # Create enhanced client
+            client_options = self.options.copy()
+            client_options.update(config)
+
             client = EnhancedTradingViewClient(
+                options=client_options,
                 auto_reconnect=config.get('auto_reconnect', True),
                 heartbeat_interval=config.get('heartbeat_interval', 30),
                 max_retries=config.get('max_retries', 3),
@@ -378,12 +383,13 @@ class DataCacheManager:
 class EnhancedTradingViewManager:
     """Enterprise-grade TradingView data source engine manager"""
 
-    def __init__(self, config_dir: str = "tradingview", db_path: str = None):
+    def __init__(self, config_dir: str = "tradingview", db_path: str = None, options: Dict = None):
         self.config_dir = Path(config_dir)
         self.db_path = db_path or str(self.config_dir / "tradingview_data.db")
+        self.options = options or {}
 
         # Core components
-        self.connection_manager = ConnectionManager()
+        self.connection_manager = ConnectionManager(options=self.options)
         self.quality_manager = EnhancedDataQualityManager()
         self.cache_manager = DataCacheManager()
         self.data_converter = TradingViewDataConverter() if 'TradingViewDataConverter' in globals() else None
@@ -464,12 +470,16 @@ class EnhancedTradingViewManager:
         self.logger.info("Starting Enterprise-grade TradingView Data Source Engine Manager")
 
         # Create default connection
-        await self.connection_manager.create_connection("default", {
+        config = {
             "auto_reconnect": True,
             "heartbeat_interval": 30,
             "max_retries": 3,
             "enable_health_monitoring": True
-        })
+        }
+        # Merge with options
+        config.update(self.options)
+
+        await self.connection_manager.create_connection("default", config)
 
         # Start background tasks
         self._background_tasks.add(asyncio.create_task(self._start_request_processor()))
@@ -973,9 +983,9 @@ class EnhancedTradingViewManager:
 # Factory and Utility Functions
 # =============================================================================
 
-def create_enhanced_tradingview_manager(config_dir: str = "tradingview") -> EnhancedTradingViewManager:
+def create_enhanced_tradingview_manager(config_dir: str = "tradingview", options: Dict = None) -> EnhancedTradingViewManager:
     """Create EnhancedTradingViewManager instance"""
-    return EnhancedTradingViewManager(config_dir=config_dir)
+    return EnhancedTradingViewManager(config_dir=config_dir, options=options)
 
 def create_data_request(symbols: List[str], timeframe: str, request_type: str = "historical",
                        count: int = 500, quality_level: str = "production") -> DataRequest:

@@ -553,6 +553,8 @@ class Client:
             })
 
             if formatted_packet:
+                if self._debug:
+                    logger.debug(f"Queuing packet: {packet_type} - {processed_data}")
                 self._send_queue.append(formatted_packet)
                 await self._send_queue_data()
             else:

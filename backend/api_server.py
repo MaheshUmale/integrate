@@ -66,7 +66,12 @@ except ImportError:
 
 try:
     from tradingview.enhanced_tradingview_manager import create_enhanced_tradingview_manager, DataQualityLevel
-    tv_manager = create_enhanced_tradingview_manager(config_dir=str(root_path / "tradingview"))
+    # Enable DEBUG logging if environment variable is set
+    DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
+    tv_manager = create_enhanced_tradingview_manager(
+        config_dir=str(root_path / "tradingview"),
+        options={"DEBUG": DEBUG_MODE}
+    )
 except ImportError as e:
     logger.error(f"Failed to import TradingView Enhanced Manager: {e}")
     tv_manager = None
@@ -370,11 +375,18 @@ def get_tv_technical_symbol(instrument_key: str) -> str:
     if sym in mapping:
         return mapping[sym]
 
-    # Default to NSE prefix for other symbols if no exchange is present
-    if ":" not in s:
-        return f"NSE:{s}"
+    # Check if it looks like a known non-NSE symbol (e.g. Crypto, US Stocks)
+    # If it already has an exchange prefix, don't force NSE
+    if ":" in s:
+        return s
 
-    return s
+    # Common crypto symbols often don't have prefix in search
+    crypto_symbols = ["BTCUSD", "ETHUSD", "SOLUSD", "BTCUSDT", "ETHUSDT"]
+    if s in crypto_symbols:
+        return f"COINBASE:{s}"
+
+    # Default to NSE prefix for other symbols if no exchange is present
+    return f"NSE:{s}"
 
 
 @fastapi_app.get("/api/tv/intraday/{instrument_key}")
