@@ -262,7 +262,8 @@ class Client:
                     # Send an integer as a ping packet per TradingView protocol
                     import time
                     ping_id = int(time.time() * 1000)
-                    ping_message = format_ws_packet(f"~h~{ping_id}")
+                    # Use raw=True for TradingView heartbeats (~h~)
+                    ping_message = format_ws_packet(f"~h~{ping_id}", raw=True)
 
                     if ping_message:
                         await self._ws.send(ping_message)
@@ -422,7 +423,8 @@ class Client:
                 # Handle Ping packets
                 if isinstance(packet, int):
                     try:
-                        await self._ws.send(format_ws_packet(f"~h~{packet}"))
+                        # Use raw=True for responses as well
+                        await self._ws.send(format_ws_packet(f"~h~{packet}", raw=True))
                         self._handle_event('ping', packet)
                     except Exception as e:
                         self._handle_error(f"Ping handling error: {str(e)}")
@@ -431,15 +433,21 @@ class Client:
                 # Handle protocol error
                 if isinstance(packet, dict) and packet.get('m') == 'protocol_error':
                     error_data = str(packet.get('p'))
-                    # Ignore unknown session errors during deletion
-                    if "unknown_session_id" in error_data and "delete_session" in error_data:
+                    # Ignore non-critical session errors
+                    is_cleanup_error = "unknown_session_id" in error_data or "delete_session" in error_data
+
+                    if is_cleanup_error:
+                        logger.debug(f"Non-critical protocol error (likely cleanup): {error_data}")
                         continue
 
                     self._handle_error(f"Protocol error: {packet.get('p')}")
-                    try:
-                        await self._ws.close()
-                    except Exception as e:
-                        self._handle_error(f"Connection close error: {str(e)}")
+                    # Only close on critical errors (not every protocol error)
+                    if "critical" in error_data.lower() or "auth" in error_data.lower():
+                        logger.warning("Critical protocol error detected, closing connection")
+                        try:
+                            await self._ws.close()
+                        except Exception as e:
+                            self._handle_error(f"Connection close error: {str(e)}")
                     continue
 
                 # Handle session data
@@ -527,11 +535,11 @@ class Client:
             for item in packet_data:
                 try:
                     if isinstance(item, dict) and not isinstance(item, str):
-                        # Dicts are always JSON stringified
-                        processed_data.append(json.dumps(item))
+                        # Dicts are always JSON stringified, use separators to avoid spaces
+                        processed_data.append(json.dumps(item, separators=(',', ':')))
                     elif isinstance(item, list) and not isinstance(item, str) and not should_preserve_arrays:
                         # Arrays stringified unless preserved
-                        processed_data.append(json.dumps(item))
+                        processed_data.append(json.dumps(item, separators=(',', ':')))
                     else:
                         # Others kept as is
                         processed_data.append(item)

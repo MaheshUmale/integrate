@@ -103,14 +103,21 @@ class EnhancedTradingViewProvider(ILiveStreamProvider, IHistoricalDataProvider):
     async def get_hist_candles(self, symbol: str, interval: str, count: int) -> List[List]:
         """Fetch historical candles using the enhanced client."""
         chart = None
+        logger.info(f"Enhanced TV: Fetching {count} candles for {symbol} ({interval})")
         try:
             chart = self.client.Session.Chart()
             # ChartSession has a get_historical_data convenience method
             klines = await chart.get_historical_data(symbol, interval, count)
-            # Format: [ts, o, h, l, c, v]
-            return [[k['time'], k['open'], k['high'], k['low'], k['close'], k['volume']] for k in klines]
+
+            if klines:
+                logger.info(f"Enhanced TV: Successfully fetched {len(klines)} candles for {symbol}")
+                # Format: [ts, o, h, l, c, v]
+                return [[k['time'], k['open'], k['high'], k['low'], k['close'], k['volume']] for k in klines]
+            else:
+                logger.warning(f"Enhanced TV: No candles returned for {symbol}")
+                return []
         except Exception as e:
-            logger.error(f"Error fetching historical candles from Enhanced TV: {e}")
+            logger.error(f"Error fetching historical candles from Enhanced TV for {symbol}: {e}")
             return []
         finally:
             if chart:
@@ -124,6 +131,7 @@ class EnhancedTradingViewProvider(ILiveStreamProvider, IHistoricalDataProvider):
         Specialized method for the enhanced provider to get indicator data.
         Uses an event-driven approach to wait for data instead of hardcoded sleep.
         """
+        logger.info(f"Enhanced TV: Fetching indicator {indicator_id} for {symbol} ({interval})")
         try:
             from tradingview import get_indicator
             ind = await get_indicator(indicator_id)
@@ -140,6 +148,7 @@ class EnhancedTradingViewProvider(ILiveStreamProvider, IHistoricalDataProvider):
 
             def on_study_update(*args):
                 if study.periods:
+                    logger.debug(f"Enhanced TV: Indicator data received for {indicator_id} on {symbol}")
                     data_event.set()
 
             study.on_update(on_study_update)
