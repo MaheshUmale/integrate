@@ -31,51 +31,10 @@ from brain.nse_confluence_scalper import scalper
 from external.tv_api import tv_api
 from external.tv_scanner import search_options
 from db.local_db import db
-from config import LOGGING_CONFIG,TV_COOKIE
-
 
 # Configure Logging
 dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
-import logging
-import sys
-
-# When adding your handler, specify the encoding
-handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-handler.terminator = '\n'
-# This is the magic line:
-handler.stream = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
-
-logging.getLogger().addHandler(handler)
-
-
-# Import TradingView Enhanced Manager
-import sys
-from pathlib import Path
-root_path = Path(__file__).parent.parent
-if str(root_path) not in sys.path:
-    sys.path.insert(0, str(root_path))
-
-# Auto-login from Brave browser as requested
-try:
-    from tradingview.auth_config import auto_login_from_brave
-    auto_login_from_brave()
-except ImportError:
-    pass
-
-try:
-    from tradingview.enhanced_tradingview_manager import create_enhanced_tradingview_manager, DataQualityLevel
-    # Enable DEBUG logging if environment variable is set
-    DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
-    tv_manager = create_enhanced_tradingview_manager(
-        config_dir=str(root_path / "tradingview"),
-        options={"DEBUG": DEBUG_MODE}
-    )
-except ImportError as e:
-    logger.error(f"Failed to import TradingView Enhanced Manager: {e}")
-    tv_manager = None
-
 
 
 @asynccontextmanager
@@ -83,14 +42,6 @@ async def lifespan(app: FastAPI):
     """Starts the enhanced trading services on startup."""
     logger.info("Initializing Enhanced ProTrade Terminal...")
     global main_loop
-
-    # Start TradingView Enhanced Manager
-    if tv_manager:
-        try:
-            await tv_manager.start()
-            logger.info("TradingView Enhanced Manager started successfully")
-        except Exception as e:
-            logger.error(f"Error starting TradingView Enhanced Manager: {e}")
 
     # Initialize Data Providers
     initialize_default_providers()
@@ -108,8 +59,6 @@ async def lifespan(app: FastAPI):
 
     # Start Options Management
     options_manager.set_socketio(sio, loop=main_loop)
-    if tv_manager:
-        options_manager.set_tv_manager(tv_manager)
     await options_manager.start()
 
     # Initialize Scalper
@@ -119,8 +68,6 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down ProTrade Terminal...")
     try:
-        if tv_manager:
-            await tv_manager.stop()
         await options_manager.stop()
         data_engine.flush_tick_buffer()
     except Exception as e:
@@ -165,15 +112,10 @@ async def handle_subscribe(sid, data):
     interval = data.get('interval', '1')
 
     for key in instrument_keys:
-        # Resolve technical symbol for TV backend compatibility
-        tv_key = get_tv_technical_symbol(key)
-
-        logger.info(f"Client {sid} subscribing to: {key} (TV Key: {tv_key}) ({interval}m)")
+        logger.info(f"Client {sid} subscribing to: {key} ({interval}m)")
         try:
-            # Join the room for the technical symbol so data_engine emissions reach the client
-            await sio.enter_room(sid, tv_key.upper())
-            # Subscribe using technical symbol
-            data_engine.subscribe_instrument(tv_key.upper(), sid, interval=str(interval))
+            await sio.enter_room(sid, key.upper())
+            data_engine.subscribe_instrument(key.upper(), sid, interval=str(interval))
         except Exception as e:
             logger.error(f"Subscription error for {key}: {e}")
 
@@ -200,12 +142,11 @@ async def handle_unsubscribe(sid, data):
     interval = data.get('interval', '1')
 
     for key in instrument_keys:
-        tv_key = get_tv_technical_symbol(key)
-        logger.info(f"Client {sid} unsubscribing from: {key} (TV Key: {tv_key})")
+        logger.info(f"Client {sid} unsubscribing from: {key}")
         try:
-            data_engine.unsubscribe_instrument(tv_key.upper(), sid, interval=str(interval))
-            if not data_engine.is_sid_using_instrument(sid, tv_key.upper()):
-                await sio.leave_room(sid, tv_key.upper())
+            data_engine.unsubscribe_instrument(key.upper(), sid, interval=str(interval))
+            if not data_engine.is_sid_using_instrument(sid, key.upper()):
+                await sio.leave_room(sid, key.upper())
         except Exception as e:
             logger.error(f"Unsubscription error for {key}: {e}")
 
@@ -307,88 +248,6 @@ async def get_tv_options(underlying: str = Query(...)):
     return {"symbols": results}
 
 
-@fastapi_app.get("/api/tv/status")
-async def get_tv_status():
-    """Returns TradingView Enhanced Manager system status."""
-    if not tv_manager:
-        raise HTTPException(status_code=503, detail="TradingView Manager not available")
-    return tv_manager.get_system_status()
-
-
-@fastapi_app.get("/api/tv/klines")
-async def get_tv_klines(
-    symbol: str = Query(...),
-    timeframe: str = Query("15"),
-    count: int = Query(100),
-    quality: str = Query("production")
-):
-    """Fetch high-quality K-line data from TradingView Enhanced Manager."""
-    if not tv_manager:
-        raise HTTPException(status_code=503, detail="TradingView Manager not available")
-
-    try:
-        quality_level = DataQualityLevel(quality.lower())
-        data = await tv_manager.get_historical_data(symbol, timeframe, count, quality_level)
-        return {
-            "success": True,
-            "symbol": data.symbol,
-            "timeframe": data.timeframe,
-            "data": data.data,
-            "quality_score": data.quality_score,
-            "metadata": data.metadata
-        }
-    except Exception as e:
-        logger.error(f"Error fetching TV klines: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def get_tv_technical_symbol(instrument_key: str) -> str:
-    """Resolves instrument key to a format TradingView backend likes."""
-    if not instrument_key:
-        return "NSE:NIFTY"
-
-    # Standardize input
-    s = instrument_key.upper().strip().replace('|', ':')
-
-    # Mapping for common Indian indices
-    mapping = {
-        "NIFTY": "NSE:NIFTY",
-        "BANKNIFTY": "NSE:BANKNIFTY",
-        "FINNIFTY": "NSE:CNXFINANCE",
-        "FINNIFTY INDEX": "NSE:CNXFINANCE",
-        "CNXFINANCE": "NSE:CNXFINANCE",
-        "INDIAVIX": "NSE:INDIAVIX",
-        "INDIA VIX": "NSE:INDIAVIX"
-    }
-
-    # If the exact string or its parts are in mapping
-    if s in mapping:
-        return mapping[s]
-
-    # Check without exchange prefix
-    base = s.split(':')[-1] if ':' in s else s
-    if base in mapping:
-        return mapping[base]
-
-    # Extract base symbol using mapper for more complex cases
-    sym = symbol_mapper.get_symbol(instrument_key)
-    if sym in mapping:
-        return mapping[sym]
-
-    # Check if it looks like a known non-NSE symbol (e.g. Crypto, US Stocks)
-    # If it already has an exchange prefix, don't force NSE
-    if ":" in s:
-        return s
-
-    # Common crypto symbols often don't have prefix in search
-    crypto_symbols = ["BTCUSD", "ETHUSD", "SOLUSD", "BTCUSDT", "ETHUSDT"]
-    if s in crypto_symbols:
-        return f"COINBASE:{s}"
-
-    # Default to NSE prefix for other symbols if no exchange is present
-    return f"NSE:{s}"
-
-
 @fastapi_app.get("/api/tv/intraday/{instrument_key}")
 async def get_intraday(instrument_key: str, interval: str = '1'):
     """Fetch intraday candles with indicators."""
@@ -396,54 +255,9 @@ async def get_intraday(instrument_key: str, interval: str = '1'):
         clean_key = unquote(instrument_key)
         hrn = symbol_mapper.get_hrn(clean_key)
 
-        # Resolve technical symbol for TV
-        tv_sym = get_tv_technical_symbol(clean_key)
-
-        from core.provider_registry import historical_data_registry
-        provider = historical_data_registry.get_primary()
-
-        tv_candles = await provider.get_hist_candles(tv_sym, interval, 1000)
+        tv_candles = await asyncio.to_thread(tv_api.get_hist_candles, clean_key, interval, 1000)
 
         valid_indicators = []
-
-        # Add high-fidelity indicators from Enhanced TV if available
-        if hasattr(provider, 'get_indicators') and tv_candles:
-            try:
-                # Example: Fetch RSI and Bollinger Bands from TV
-                # Note: This is an example of the "full range of features"
-                # Fetch RSI
-                rsi_data = await provider.get_indicators(tv_sym, interval, 'STD;RSI', {'length': 14})
-                if rsi_data:
-                    valid_indicators.append({
-                        "id": "tv_rsi",
-                        "title": "RSI (14)",
-                        "type": "line",
-                        "style": {"color": "#a855f7", "lineWidth": 1},
-                        "data": [{"time": d['time'], "value": d['plot_0']} for d in rsi_data if d.get('plot_0') is not None]
-                    })
-
-                # Fetch Bollinger Bands
-                bb_data = await provider.get_indicators(tv_sym, interval, 'STD;BB', {'length': 20, 'mult': 2})
-                if bb_data:
-                    # Plot 0: Basis, Plot 1: Upper, Plot 2: Lower
-                    valid_indicators.append({
-                        "id": "tv_bb_basis", "title": "BB Basis", "type": "line",
-                        "style": {"color": "#fbbf24", "lineWidth": 1, "lineStyle": 2},
-                        "data": [{"time": d['time'], "value": d['plot_0']} for d in bb_data if d.get('plot_0') is not None]
-                    })
-                    valid_indicators.append({
-                        "id": "tv_bb_upper", "title": "BB Upper", "type": "line",
-                        "style": {"color": "#3b82f6", "lineWidth": 1},
-                        "data": [{"time": d['time'], "value": d['plot_1']} for d in bb_data if d.get('plot_1') is not None]
-                    })
-                    valid_indicators.append({
-                        "id": "tv_bb_lower", "title": "BB Lower", "type": "line",
-                        "style": {"color": "#3b82f6", "lineWidth": 1},
-                        "data": [{"time": d['time'], "value": d['plot_2']} for d in bb_data if d.get('plot_2') is not None]
-                    })
-            except Exception as e:
-                logger.error(f"Error fetching TV indicators: {e}")
-
         if tv_candles:
             try:
                 import pandas as pd
@@ -659,20 +473,11 @@ async def get_pcr_trend(underlying: str):
     """Returns historical PCR data for current trading day."""
     history = db.query(
         """
-        SELECT timestamp,
-            AVG(pcr_oi) as pcr_oi,
-            AVG(pcr_vol) as pcr_vol,
-            AVG(pcr_oi_change) as pcr_oi_change,
-            AVG(underlying_price) as underlying_price,
-            MAX(max_pain) as max_pain,
-            AVG(spot_price) as spot_price,
-            MAX(total_oi) as total_oi,
-            MAX(total_oi_change) as total_oi_change
+        SELECT timestamp, pcr_oi, pcr_vol, pcr_oi_change, underlying_price, max_pain, spot_price, total_oi, total_oi_change
         FROM pcr_history
         WHERE underlying = ?
         AND CAST((timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata' AS DATE) =
             CAST(( ((SELECT MAX(timestamp) FROM pcr_history WHERE underlying = ?)) AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata' AS DATE)
-        GROUP BY timestamp
         ORDER BY timestamp ASC
         """,
         (underlying, underlying),
@@ -687,20 +492,11 @@ async def get_full_options_history(underlying: str):
     """Returns all PCR and Option Snapshots for today for REPLAY."""
     pcr_history = db.query(
         """
-        SELECT timestamp,
-            AVG(pcr_oi) as pcr_oi,
-            AVG(pcr_vol) as pcr_vol,
-            AVG(pcr_oi_change) as pcr_oi_change,
-            AVG(underlying_price) as underlying_price,
-            MAX(max_pain) as max_pain,
-            AVG(spot_price) as spot_price,
-            MAX(total_oi) as total_oi,
-            MAX(total_oi_change) as total_oi_change
+        SELECT timestamp, pcr_oi, pcr_vol, pcr_oi_change, underlying_price, max_pain, spot_price, total_oi, total_oi_change
         FROM pcr_history
         WHERE underlying = ?
         AND CAST((timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata' AS DATE) =
             CAST(( ((SELECT MAX(timestamp) FROM pcr_history WHERE underlying = ?)) AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata' AS DATE)
-        GROUP BY timestamp
         ORDER BY timestamp ASC
         """,
         (underlying, underlying),
@@ -798,7 +594,8 @@ async def build_strategy(request: Request):
         underlying = body.get('underlying')
         spot_price = body.get('spot_price')
         if not spot_price:
-            spot_price = await options_manager.get_spot_price(underlying)
+            res = db.query("SELECT price FROM ticks WHERE instrumentKey = ? ORDER BY ts_ms DESC LIMIT 1", (underlying,))
+            spot_price = res[0]['price'] if res else 0
 
         legs = body.get('legs', [])
 
@@ -826,7 +623,9 @@ async def create_bull_call_spread(request: Request):
         spot_price = body.get('spot_price')
 
         if not spot_price:
-            spot_price = await options_manager.get_spot_price(underlying)
+            # Try to get spot price
+            res = db.query("SELECT price FROM ticks WHERE instrumentKey = ? ORDER BY ts_ms DESC LIMIT 1", (underlying,))
+            spot_price = res[0]['price'] if res else 0
 
         strategy = strategy_builder.create_bull_call_spread(
             underlying=underlying,
@@ -859,7 +658,8 @@ async def create_iron_condor(request: Request):
         spot_price = body.get('spot_price')
 
         if not spot_price:
-            spot_price = await options_manager.get_spot_price(underlying)
+            res = db.query("SELECT price FROM ticks WHERE instrumentKey = ? ORDER BY ts_ms DESC LIMIT 1", (underlying,))
+            spot_price = res[0]['price'] if res else 0
 
         strategy = strategy_builder.create_iron_condor(
             underlying=underlying,
@@ -893,7 +693,8 @@ async def create_long_straddle(request: Request):
         spot_price = body.get('spot_price')
 
         if not spot_price:
-            spot_price = await options_manager.get_spot_price(underlying)
+            res = db.query("SELECT price FROM ticks WHERE instrumentKey = ? ORDER BY ts_ms DESC LIMIT 1", (underlying,))
+            spot_price = res[0]['price'] if res else 0
 
         strategy = strategy_builder.create_long_straddle(
             underlying=underlying,
@@ -1037,51 +838,6 @@ async def resume_alert(alert_id: str):
     if alert_system.resume_alert(alert_id):
         return {"status": "success", "message": "Alert resumed"}
     raise HTTPException(status_code=404, detail="Alert not found")
-
-
-# ==================== TICK CHART API ====================
-
-@fastapi_app.get("/api/ticks/history/{instrument_key}")
-async def get_tick_history(instrument_key: str, limit: int = 10000):
-    """Fetches last N ticks for an instrument."""
-    try:
-        clean_key = unquote(instrument_key)
-        logger.info(f"Fetching tick history for {clean_key} (limit: {limit})")
-
-        # Fetch ticks from DuckDB ticks table
-        history = db.query(
-            "SELECT ts_ms, price, qty FROM ticks WHERE instrumentKey = ? ORDER BY ts_ms DESC LIMIT ?",
-            (clean_key, limit),
-            json_serialize=True
-        )
-
-        logger.info(f"Retrieved {len(history)} ticks for {clean_key}")
-
-        # Return in ascending order for the chart
-        return {"history": history[::-1]}
-    except Exception as e:
-        logger.error(f"Error fetching tick history for {instrument_key}: {e}")
-        return {"history": []}
-
-
-@fastapi_app.get("/tick")
-@fastapi_app.get("/tick/{path:path}")
-async def serve_tick_chart(request: Request, path: Optional[str] = None):
-    """Serves the separate tick chart page."""
-    return templates.TemplateResponse("tick_chart.html", {"request": request})
-
-
-@fastapi_app.get("/renko")
-@fastapi_app.get("/renko/{path:path}")
-async def serve_renko_chart(request: Request, path: Optional[str] = None):
-    """Serves the separate Renko chart page."""
-    return templates.TemplateResponse("renko_chart.html", {"request": request})
-
-
-@fastapi_app.get("/tv-chart")
-async def serve_tv_advanced_chart(request: Request):
-    """Serves the advanced TradingView widget chart page."""
-    return templates.TemplateResponse("tv_widget.html", {"request": request})
 
 
 # ==================== STATIC FILES & TEMPLATES ====================
