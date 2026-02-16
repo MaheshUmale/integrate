@@ -58,22 +58,8 @@ def flush_tick_buffer():
     if to_insert:
         try:
             db.insert_ticks(to_insert)
-            logger.debug(f"Flushed {len(to_insert)} ticks to DB")
         except Exception as e:
             logger.error(f"DB Insert Error: {e}")
-
-def periodic_flush():
-    """Background task to flush ticks every 10 seconds."""
-    while True:
-        try:
-            time.sleep(10)
-            flush_tick_buffer()
-        except Exception as e:
-            logger.error(f"Error in periodic_flush: {e}")
-            time.sleep(5)
-
-# Start periodic flush thread
-threading.Thread(target=periodic_flush, daemon=True).start()
 
 last_emit_times = {}
 
@@ -151,16 +137,9 @@ def subscribe_instrument(instrument_key: str, sid: str, interval: str = "1"):
         room_subscribers[key].add(sid)
         logger.info(f"Room {instrument_key} ({interval}m) now has {len(room_subscribers[key])} subscribers")
 
-    # Use the primary live stream provider (highest priority)
-    from core.provider_registry import live_stream_registry
-    provider = live_stream_registry.get_primary()
-    if provider:
-        try:
-            provider.set_callback(on_message)
-            provider.start()
-            provider.subscribe([instrument_key], interval=interval)
-        except Exception as e:
-            logger.error(f"Error subscribing with primary provider: {e}")
+    from external.tv_live_wss import start_tv_wss
+    wss = start_tv_wss(on_message)
+    wss.subscribe([instrument_key], interval=interval)
 
 def is_sid_using_instrument(sid: str, instrument_key: str) -> bool:
     """Check if a specific client is still using this instrument in any interval."""
@@ -180,13 +159,10 @@ def unsubscribe_instrument(instrument_key: str, sid: str, interval: str = "1"):
 
         if len(room_subscribers[key]) == 0:
             logger.info(f"Unsubscribing from {instrument_key} ({interval}m) as no more subscribers")
-            from core.provider_registry import live_stream_registry
-            provider = live_stream_registry.get_primary()
-            if provider:
-                try:
-                    provider.unsubscribe(instrument_key, interval=interval)
-                except Exception as e:
-                    logger.error(f"Error unsubscribing with primary provider: {e}")
+            from external.tv_live_wss import get_tv_wss
+            wss = get_tv_wss()
+            if wss:
+                wss.unsubscribe(instrument_key, interval=interval)
             del room_subscribers[key]
 
 def handle_disconnect(sid: str):
@@ -200,12 +176,5 @@ def handle_disconnect(sid: str):
         unsubscribe_instrument(key, sid, interval)
 
 def start_websocket_thread(token: str, keys: List[str]):
-    from core.provider_registry import live_stream_registry
-    provider = live_stream_registry.get_primary()
-    if provider:
-        try:
-            provider.set_callback(on_message)
-            provider.start()
-            provider.subscribe(keys or INITIAL_INSTRUMENTS)
-        except Exception as e:
-            logger.error(f"Error starting primary provider: {e}")
+    from external.tv_live_wss import start_tv_wss
+    start_tv_wss(on_message, INITIAL_INSTRUMENTS)
