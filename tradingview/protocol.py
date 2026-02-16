@@ -117,7 +117,8 @@ def format_ws_packet(packet, raw=False):
     """
     try:
         if isinstance(packet, dict):
-            msg = json.dumps(packet)
+            # Use compact JSON representation to match TradingView expectations
+            msg = json.dumps(packet, separators=(',', ':'))
         else:
             msg = str(packet)
 

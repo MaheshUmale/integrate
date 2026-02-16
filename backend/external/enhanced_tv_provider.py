@@ -70,8 +70,9 @@ class EnhancedTradingViewProvider(ILiveStreamProvider, IHistoricalDataProvider):
 
             def on_update():
                 if chart.periods and self.callback:
+                    # Emit live feed for ticker
                     latest = chart.periods[0]
-                    data = {
+                    feed_data = {
                         'feeds': {
                             symbol: {
                                 'last_price': latest.close,
@@ -81,7 +82,18 @@ class EnhancedTradingViewProvider(ILiveStreamProvider, IHistoricalDataProvider):
                             }
                         }
                     }
-                    self.callback(data)
+                    self.callback(feed_data)
+
+                    # Also emit chart_update for full candles
+                    chart_data = {
+                        'type': 'chart_update',
+                        'instrumentKey': symbol,
+                        'interval': interval,
+                        'data': {
+                            'ohlcv': [[p.time, p.open, p.high, p.low, p.close, p.volume] for p in chart.periods[:20]]
+                        }
+                    }
+                    self.callback(chart_data)
 
             chart.on_update(on_update)
             logger.info(f"Enhanced TV Provider subscribed to {symbol} ({interval})")
